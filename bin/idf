@@ -1,0 +1,30 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/export
+
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "idf:\n  to prompt you export IDF_PATH, help to develop on esp-idf"
+    exit
+fi
+
+if [ $IDF_PATH ]; then
+    IDF_PATH_CURRENT=${IDF_PATH%*/}
+    CUR=$(pwd)
+    export IDF_PATH_PROMPT=${CUR%/examples*}
+
+    if [ "$IDF_PATH_CURRENT" == "$IDF_PATH_PROMPT" ]; then
+        ESP_LOGI "same exported IDF_PATH: $IDF_PATH"
+    else
+        ESP_LOGI "exported IDF_PATH: $IDF_PATH"
+        ESP_LOGW "Prompt: export IDF_PATH=$IDF_PATH_PROMPT"
+    fi
+
+else
+    CUR=$(pwd)
+    IDF_PATH=${CUR%/examples*}
+    ESP_LOGI "export IDF_PATH=$IDF_PATH"
+fi
