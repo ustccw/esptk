@@ -1,0 +1,27 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/export
+
+# help
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "NAME\n  m:  make -j8"
+    ESP_LOGN "  Please export \$IDF_PATH if compile on espressif platform"
+    exit
+fi
+
+ESP_IDF_CHECK
+
+# set default configuration
+if [ -e "sdkconfig" ]; then
+    echo "make with sdkconfig"
+else
+    make defconfig || MEXIT "make defconfig failed!"
+    echo "make defconfig done"
+fi
+
+# compile
+make -j8 || MEXIT "Compile Failed!"
