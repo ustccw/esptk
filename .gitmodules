@@ -1,0 +1,3 @@
+[submodule "components/esptool"]
+	path = components/esptool
+	url = https://github.com/espressif/esptool.git
