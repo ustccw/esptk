@@ -4,7 +4,7 @@ set -e
 
 TK_PATH=`realpath $0`
 TK_PATH=`echo ${TK_PATH%/bin*}`
-source $TK_PATH/bin/export
+source $TK_PATH/bin/esptk-export
 
 if [ "$1" = "-h" ]; then
     ESP_LOGB "NAME:\n  susb: ls -al /dev/ttyUSB*"
