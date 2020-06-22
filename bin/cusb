@@ -1,0 +1,24 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/export
+
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "NAME:\n  cm: chmod 777 /dev/ttyUSB*"
+    exit
+fi
+
+for sp in /dev/ttyUSB*
+do {
+    if [ $sp == "/dev/ttyUSB*" ]; then
+        ESP_LOGW "No /dev/ttyUSB* Device!"
+        exit
+    fi
+
+    sudo chmod 777 /dev/ttyUSB* && ESP_LOGI "chmod 777 /dev/ttyUSB* OK!" && exit
+    ESP_LOGW "chmod 777 /dev/ttyUSB* failed!"
+}
+done
