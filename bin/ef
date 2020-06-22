@@ -1,0 +1,83 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/export
+
+# erase baud rate
+export erase_baud=921600
+
+# try to erase times if failed
+export try_counts=1
+
+# save error log if erase failed
+export log_file="ef_failed.log"
+
+function esp_erase_all_flash()
+{
+    for sp in /dev/ttyUSB*
+    do {
+        if [ $sp == "/dev/ttyUSB*" ]; then
+            ESP_LOGW "No /dev/ttyUSB* Device!"
+            exit
+        fi
+    }
+    done
+
+    for sp in /dev/ttyUSB*
+    do {
+        one_sp=${sp#*USB}
+        esp_erase_one_flash $one_sp
+    } &
+    done
+    wait
+}
+
+function esp_erase_one_flash()
+{
+    if [ -e "/dev/ttyUSB$1" ]; then
+        for((i=1;i<=$try_counts;i++));
+        do {
+            ESP_LOGI "Erase /dev/ttyUSB$1..."   \
+                && esptool.py --port /dev/ttyUSB$1 --baud $erase_baud erase_flash   \
+                && ESP_LOGI "Erase /dev/ttyUSB$1 Done!" && break
+            ESP_LOGW "Try again: erase /dev/ttyUSB$1 [$i/$try_counts]"
+            if [ $i -eq $try_counts ]; then
+                echo "esptool.py --port /dev/ttyUSB$1 --baud $erase_baud erase_flash" >> $log_file
+            fi
+        }
+        done
+    else
+        ESP_LOGW "No /dev/ttyUSB$1"
+        exit
+    fi
+}
+
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "NAME:\n  ef: esptool.py --port /dev/ttyUSB* --baud $erase_baud erase_flash\n"
+    ESP_LOGN "  ef : erase all flash"
+    ESP_LOGN "  ef [x]: erase one flash by index 'x', such as 'ef 1' means: erase flash by /dev/ttyUSB1"
+    exit
+fi
+
+whereis esptool.py | grep "esptool.py" > /dev/null || MEXIT "Please install esptool.py firstly!"
+
+ESP_DEL $log_file
+
+if [ $# -eq 0 ]; then
+    esp_erase_all_flash
+elif [ $# -eq 1 ]; then
+    esp_erase_one_flash $1
+elif [ $# -gt 1 ]; then
+    ESP_LOGE "unsupported paramter counts:$#, expected see 0 or 1"
+fi
+
+# show result
+if [ -e "$log_file" ]; then
+    ESP_LOGE "Skip erase failed USB, please lookup $log_file!!!"
+    exit
+else
+    ESP_LOGI "All Flash Erase OK!"
+fi
