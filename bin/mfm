@@ -1,0 +1,140 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/esptk-export
+
+# erase baud rate
+export mf_baud=921600
+
+# try times if failed
+export try_counts=1
+
+# save error log if make flash monitor failed
+export log_file="mfm_failed.log"
+
+function esp_make_all_flash()
+{
+    for sp in /dev/ttyUSB*
+    do {
+        if [ $sp == "/dev/ttyUSB*" ]; then
+            ESP_LOGW "No /dev/ttyUSB* Device!"
+            exit
+        fi
+    }
+    done
+
+    for sp in /dev/ttyUSB*
+    do {
+        one_sp=${sp#*USB}
+        esp_make_one_flash $one_sp
+    } &
+    done
+    wait
+}
+
+function esp_make_one_flash()
+{
+    if [ -e "/dev/ttyUSB$1" ]; then
+        for((i=1;i<=$try_counts;i++));
+        do {
+            ESP_LOGI "make flash ESPPORT=/dev/ttyUSB$1 ESPBAUD=$mf_baud..."  \
+            && make flash ESPPORT=/dev/ttyUSB$1 ESPBAUD=$mf_baud    \
+            && ESP_LOGI "make flash ESPPORT=/dev/ttyUSB$1 ESPBAUD=$mf_baud Done!" && break
+
+            ESP_LOGW "Try again: make flash ESPPORT=/dev/ttyUSB$1 ESPBAUD=$mf_baud [$i/$try_counts]"
+
+            if [ $i -eq $try_counts ]; then
+                echo "make flash ESPPORT=/dev/ttyUSB$1 ESPBAUD=$mf_baud" >> $log_file
+            fi
+        }
+        done
+    else
+        ESP_LOGW "No /dev/ttyUSB$1"
+        exit
+    fi
+}
+
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "NAME\n  mfm: make flash monitor ESPPORT=/dev/ttyUSB*\n"
+    ESP_LOGN "  mfm : make flash monitor all device"
+    ESP_LOGN "  mfm [x]: make flash monitor one device by index 'x', such as 'mfm 1' means: make flash monitor ESPPORT=/dev/ttyUSB1"
+    exit
+fi
+
+# make
+ESP_IDF_CHECK
+
+ESP_OBJ_CHECK "Makefile"
+
+# set default configuration
+if [ -e "sdkconfig" ]; then
+    echo "make with sdkconfig"
+else
+    make defconfig || MEXIT "make defconfig failed!"
+    echo "make defconfig done"
+fi
+
+# compile
+make -j8 || MEXIT "Compile Failed!"
+
+ESP_DEL $log_file
+
+if [ $# -eq 0 ]; then
+    esp_make_all_flash
+elif [ $# -eq 1 ]; then
+    esp_make_one_flash $1
+elif [ $# -gt 1 ]; then
+    ESP_LOGE "unsupported paramter counts:$#, expected see 0 or 1"
+fi
+
+# show result
+if [ -e "$log_file" ]; then
+    ESP_LOGE "Skipped download failed flash, please lookup $log_file!"
+    exit
+else
+    ESP_LOGI "All flash download OK!"
+fi
+
+# make monitor
+function esp_mm_one_flash()
+{
+    if [ -e "/dev/ttyUSB$1" ]; then
+        ESP_LOGI "make monitor ESPPORT=/dev/ttyUSB$1"
+        make monitor ESPPORT=/dev/ttyUSB$1
+    else
+        ESP_LOGW "No /dev/ttyUSB$1" && exit
+    fi
+}
+
+function esp_mm_all_flash()
+{
+    for sp in /dev/ttyUSB*
+    do
+    {
+        if [ $sp == "/dev/ttyUSB*" ]; then
+            ESP_LOGE "No /dev/ttyUSB* Device!"
+            exit
+        fi
+
+        spcounts=`ls -al /dev/ttyUSB* | wc -l`
+        if [ $spcounts -eq 1 ]; then
+            ESP_LOGI "make monitor ESPPORT=$sp"
+            make monitor ESPPORT=$sp
+        else
+            ESP_LOGI "+make monitor ESPPORT=$sp"
+            gnome-terminal -x bash -c "export IDF_PATH=$IDF_PATH; echo \"make monitor ESPPORT=$sp\"; make monitor ESPPORT=$sp"  
+        fi
+    }
+    done
+}
+
+if [ $# -eq 0 ]; then
+    esp_mm_all_flash
+elif [ $# -eq 1 ]; then
+    esp_mm_one_flash $1
+elif [ $# -gt 1 ]; then
+    ESP_LOGE "unsupported paramter counts:$#, expected see 0 or 1"
+fi
