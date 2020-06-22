@@ -5,9 +5,16 @@ set -e
 TK_PATH=`realpath $0`
 TK_PATH=`echo ${TK_PATH%/bin*}`
 
-for command in $TK_PATH/common/*
+for sh in $TK_PATH/common/*
 do {
-    source $command
+    source $sh
+}
+done
+wait
+
+for component in $TK_PATH/components/*
+do {
+    export PATH=$component:$PATH
 }
 done
 wait

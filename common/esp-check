@@ -11,17 +11,21 @@ function ESP_DEL()
     fi
 }
 
-function IDF_CHECK()
+function ESP_IDF_CHECK()
 {
+    ESP_OBJ_CHECK "Makefile"
+
     if [ $IDF_PATH ]; then
         ESP_LOGI "IDF_PATH:$IDF_PATH"
+    elif cat Makefile | grep "export IDF_PATH" > /dev/null; then
+        ESP_LOGI "Implicit \$IDF_PATH found in Makefile"
     else
-        ESP_LOGW "No \$IDF_PATH exported, Please export!!!"
+        ESP_LOGE "No \$IDF_PATH found, Please export \$IDF_PATH firstly!!!"
         exit
     fi
 }
 
-function OBJ_CHECK()
+function ESP_OBJ_CHECK()
 {
     if [ ! -e "$1" ]; then
         opath=`realpath .`
