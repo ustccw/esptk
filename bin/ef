@@ -76,7 +76,7 @@ fi
 
 # show result
 if [ -e "$log_file" ]; then
-    ESP_LOGE "Skip erase failed USB, please lookup $log_file!!!"
+    ESP_LOGE "Skipped erase failed flash, please lookup $log_file!!!"
     exit
 else
     ESP_LOGI "All Flash Erase OK!"
