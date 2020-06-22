@@ -1,0 +1,37 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+function ESP_DEL()
+{
+    if [ -e "$1" ]; then
+        rm -rf $1
+        ESP_LOGN "delete $1"
+        sync
+    fi
+}
+
+function IDF_CHECK()
+{
+    if [ $IDF_PATH ]; then
+        ESP_LOGI "IDF_PATH:$IDF_PATH"
+    else
+        ESP_LOGW "No \$IDF_PATH exported, Please export!!!"
+        exit
+    fi
+}
+
+function OBJ_CHECK()
+{
+    if [ ! -e "$1" ]; then
+        opath=`realpath .`
+        ESP_LOGE "ERROR: No $1 in $opath, exit!!!"
+        exit
+    fi
+}
+
+function MEXIT()
+{
+    ESP_LOGE "$1, exit!!!"
+    exit
+}

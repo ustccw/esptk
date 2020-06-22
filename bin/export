@@ -1,0 +1,13 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+
+for command in $TK_PATH/common/*
+do {
+    source $command
+}
+done
+wait

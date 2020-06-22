@@ -1,0 +1,45 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+function ESP_LOGE()
+{
+    echo -e "\033[31m$1\033[0m"
+    exit
+}
+
+function ESP_LOGEB()
+{
+    echo -e "\033[1;31m$1\033[0m"
+    exit
+}
+
+function ESP_LOGI()
+{
+    echo -e "\033[32m$1\033[0m"
+}
+
+function ESP_LOGIB()
+{
+    echo -e "\033[1;32m$1\033[0m"
+}
+
+function ESP_LOGW()
+{
+    echo -e "\033[33m$1\033[0m"
+}
+
+function ESP_LOGWB()
+{
+    echo -e "\033[1;33m$1\033[0m"
+}
+
+function ESP_LOGB()
+{
+    echo -e "\033[1m$1\033[0m"
+}
+
+function ESP_LOGN()
+{
+    echo "$1"
+}
