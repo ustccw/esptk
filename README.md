@@ -12,7 +12,7 @@ esptk is Free Software under a MIT license.
 Development mode allows you to run the latest development version from this repository.
 
 ### Temporary installation to shell terminal
-```
+```shell
 $ git clone https://github.com/ustccw/esptk.git
 $ cd esptk
 $ git submodule update --init --recursive
@@ -20,15 +20,15 @@ $ export PATH=./bin/:$PATH
 ```
 
 ### Permanent installation to shell terminal
-```
+```shell
 $ git clone https://github.com/ustccw/esptk.git
 $ cd esptk
 $ git submodule update --init --recursive
-TK_PATH=`realpath ./bin`
-echo "# add by esptk" >> ~/.bashrc
-echo "export PATH=$TK_PATH:\$PATH" >> ~/.bashrc
-echo "" >> ~/.bashrc
-source ~/.bashrc
+$ TK_PATH=`realpath ./bin`
+$ echo "# add by esptk" >> ~/.bashrc
+$ echo "export PATH=$TK_PATH:\$PATH" >> ~/.bashrc
+$ echo "" >> ~/.bashrc
+$ source ~/.bashrc
 ```
 
 # Usage
