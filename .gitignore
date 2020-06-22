@@ -1,0 +1,8 @@
+# eclipse setting
+.settings
+
+# MacOS directory files
+.DS_Store
+
+# VS Code Settings
+.vscode/
