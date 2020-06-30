@@ -1,0 +1,36 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/esptk-export
+
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "NAME:\n  catn: catn <n>"
+    ESP_LOGB "  print nth file content"
+
+    ESP_LOGN "\n  weird filename is always allowed on linux, such as include space, or characters characters,"
+    ESP_LOGN "  we can look up its content by 'catn <n>'"
+    exit
+fi
+
+if [ $# -eq 1 ]; then
+    xnd=`echo $1'p'`
+    nfilename=`ls | sed -n $xnd`
+
+    if [ -d "$nfilename" ]; then
+        ESP_LOGE "<$nfilename> is a directory!"
+        exit
+    elif [ ! -e "$nfilename" ]; then
+        ESP_LOGE "the $1th file not found!"
+    fi
+
+    ESP_LOGIB 'filename:'\<$nfilename\>
+    ESP_LOGB '-------------------------------------------------------------------------'
+    ls | sed -n $xnd | xargs cat
+    ESP_LOGB '------------------------------- END  ------------------------------------'
+
+else
+    ESP_LOGE "error parameter counts:$#, exit!"
+fi
