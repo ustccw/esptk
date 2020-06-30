@@ -1,0 +1,68 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/esptk-export
+
+outfile=`echo blank-$1bytes.bin`
+
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "NAME:\n  gbin: gbin <decimal size> [<decimal number>]\n"
+    ESP_LOGN "  <decimal number>: in [0, 255]"
+    ESP_LOGN "  default value is 255, means 0xFF in hexadecimal"
+    ESP_LOGN ""
+    ESP_LOGN "  Example A: generate a 4KB size file, all of the file content is 0xFF, by default way"
+    ESP_LOGB "    gbin 4096"
+
+    ESP_LOGN "\n  Example B: generate a 32 bytes size file, all of the file content is 0xAA"
+    ESP_LOGB "    gbin 32 170"
+
+    ESP_LOGN "\n  Example C: generate a 1MB size file, all of the file content is 0x0"
+    ESP_LOGB "    gbin 1048576 0"
+    exit
+fi
+
+if [ $# -lt 1 ]; then
+    ESP_LOGE "error parameter counts:$#, exit!"
+    exit
+elif [ $# -eq 1 ]; then
+    character='\377'
+elif [ $# -eq 2 ]; then
+    octchar=`echo "obase=8;ibase=10;$2" | bc`
+    character=`echo "\\\\$octchar"`
+
+    hexchar=`echo "obase=16;ibase=10;$2" | bc`
+    if [ $hexchar == "0" ]; then
+        outfile=`echo zero-$1bytes.bin`
+    elif [ $hexchar == "FF" ]; then
+        outfile=`echo blank-$1bytes.bin`
+    else
+        outfile=`echo char$hexchar-$1bytes.bin`
+    fi
+else
+    ESP_LOGE "error parameter counts:$#, exit!"
+fi
+
+if [ -e $outfile ]; then
+    ESP_LOGIB "outfile: $(pwd)/$outfile"
+    exit
+fi
+
+# decimal size = sector_counts * sector_size + remaining_size
+sector_size=4096
+sector_counts=$(($1 / $sector_size))
+remaining_size=$(($1 % $sector_size))
+
+ESP_LOGI "total size: $sector_counts*$sector_size + $remaining_size"
+
+if [ $sector_counts -gt 0 ]; then
+    tr '\000' $character < /dev/zero | dd of=$outfile bs=$sector_size count=$sector_counts
+fi
+
+if [ $remaining_size -gt 0 ]; then
+    tr '\000' $character < /dev/zero | dd of=$outfile bs=$remaining_size count=1 oflag=append conv=notrunc
+fi
+
+ESP_LOGIB "outfile: $(pwd)/$outfile"
