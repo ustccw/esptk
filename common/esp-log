@@ -41,5 +41,5 @@ function ESP_LOGB()
 
 function ESP_LOGN()
 {
-    echo "$1"
+    echo -e "$1"
 }
