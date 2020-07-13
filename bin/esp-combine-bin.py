@@ -3,6 +3,7 @@
 # chenwu@espressif.com
 
 import sys, os, re
+from os.path import abspath
 
 units = {"B": 1, "KB": 2**10, "MB": 2**20, "GB": 2**30, "TB": 2**40}
 
@@ -77,9 +78,37 @@ def esp_combine_bin():
     # write file
     with open("target.bin", 'wb') as f:
         f.write(bin_data)
-        print("\033[1;32mgenerate target.bin OK!\033[0m")
+        print("\033[1;32mBin successfully combined! ----> %s/target.bin\033[0m" %os.path.abspath('.'))
+
+
+def ESP_LOGB(log):
+    print("\033[1m%s\033[0m" %log)
+
+def ESP_LOGN(log):
+    print("%s" %log)
+
+def esp_show_help():
+    ESP_LOGB("NAME:\n esp-combine-bin.py: esp-combine-bin.py [[<addr> <file>] .. [<addr> <file>]] [size]\n")
+    ESP_LOGN("  addr: can be hexadecimal, decimal, octal and binary format, such as 0x1000, 1000, 01000 or 0b1000")
+    ESP_LOGN("  file: can be an absolute path or relative to the current directory path, such as ~/f.bin or b/a.bin")
+    ESP_LOGN("  size: can be a decimal number or a decimal number appended with {B,KB,MB,GB}, such as 1024, 1KB, 2MB")
+    ESP_LOGN("  default size is equal to max address among all the <addr> plus the size of that <file>")
+    ESP_LOGN("  The spare part between all the file will be filled with 0xFF\n")
+
+    ESP_LOGN("  Example A: combine several small bins into a 2MB bin")
+    ESP_LOGB("    esp-combine-bin.py 0x10000 ota_data_initial.bin 0x1000 bootloader/bootloader.bin 2MB\n")
+
+    ESP_LOGN("  Example B: combine several small bins into bin, target.bin size depends on the actual combination")
+    ESP_LOGB("    esp-combine-bin.py 0x10000 ~/ota_data_initial.bin 0x1000 ~/bootloader/bootloader.bin\n")
+
+    ESP_LOGN("  Example C: generate a 4KB size file, filled with 0xFF")
+    ESP_LOGB("    esp-combine-bin.py 4096")
 
 def _main():
+    if sys.argv[1] == '-h':
+        esp_show_help()
+        sys.exit(0)
+
     esp_combine_bin()
 
 if __name__ == '__main__':
