@@ -7,11 +7,13 @@ TK_PATH=`echo ${TK_PATH%/bin*}`
 source $TK_PATH/bin/esptk-export
 
 outfile=`echo blank-$1bytes.bin`
+random=0
 
 if [ "$1" = "-h" ]; then
     ESP_LOGB "NAME:\n  gbin: gbin <decimal size> [<decimal number>]\n"
-    ESP_LOGN "  <decimal number>: in [0, 255]"
-    ESP_LOGN "  default value is 255, means 0xFF in hexadecimal"
+    ESP_LOGN "  <decimal number>: in [0, 255] or symbol 'R'"
+    ESP_LOGN "  - default value is 255, means 0xFF in hexadecimal"
+    ESP_LOGN "  - symbol 'R' means random number"
     ESP_LOGN ""
     ESP_LOGN "  Example A: generate a 4KB size file, all of the file content is 0xFF, by default way"
     ESP_LOGB "    gbin 4096"
@@ -21,6 +23,9 @@ if [ "$1" = "-h" ]; then
 
     ESP_LOGN "\n  Example C: generate a 1MB size file, all of the file content is 0x0"
     ESP_LOGB "    gbin 1048576 0"
+
+    ESP_LOGN "\n  Example D: generate a 2KB size file, all of the file content filled with random number"
+    ESP_LOGB "    gbin 2048 R"
     exit
 fi
 
@@ -41,6 +46,12 @@ elif [ $# -eq 2 ]; then
     else
         outfile=`echo char$hexchar-$1bytes.bin`
     fi
+
+    if [ "$2" = "R" ]; then
+        outfile=`echo random-$1bytes.bin`
+        rm -rf $(pwd)/$outfile
+        random=1
+    fi
 else
     ESP_LOGE "error parameter counts:$#, exit!"
 fi
@@ -56,6 +67,13 @@ sector_counts=$(($1 / $sector_size))
 remaining_size=$(($1 % $sector_size))
 
 ESP_LOGI "total size: $sector_counts*$sector_size + $remaining_size"
+
+if [ $random -eq 1 ]; then
+    dd of=$outfile bs=$sector_size count=$sector_counts < /dev/urandom
+    dd of=$outfile bs=$remaining_size count=1 oflag=append conv=notrunc < /dev/urandom
+    ESP_LOGIB "outfile: $(pwd)/$outfile"
+    exit
+fi
 
 if [ $sector_counts -gt 0 ]; then
     tr '\000' $character < /dev/zero | dd of=$outfile bs=$sector_size count=$sector_counts
