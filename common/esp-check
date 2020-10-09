@@ -13,8 +13,6 @@ function ESP_DEL()
 
 function ESP_IDF_CHECK()
 {
-    ESP_OBJ_CHECK "Makefile"
-
     if [ $IDF_PATH ]; then
         ESP_LOGI "IDF_PATH:$IDF_PATH"
     elif cat Makefile | grep "export IDF_PATH" > /dev/null; then

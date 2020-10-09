@@ -13,6 +13,7 @@ if [ "$1" = "-h" ]; then
     exit
 fi
 
+ESP_OBJ_CHECK "Makefile"
 ESP_IDF_CHECK
 
 # set default configuration
