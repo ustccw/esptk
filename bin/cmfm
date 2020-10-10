@@ -1,0 +1,170 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/esptk-export
+
+# baud rate
+export mf_baud=921600
+
+# try times if failed
+export try_counts=1
+
+# save error log if idf.py flash monitor failed
+export log_file="cmfm_failed.log"
+
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "NAME\n  cmfm: \$IDF_PATH/tools/idf.py -p /dev/ttyUSB* flash monitor\n"
+    ESP_LOGN "  cmfm : idf.py flash monitor all device"
+    ESP_LOGN "  cmfm [x]: idf.py flash monitor one device by index 'x', such as 'cmfm 1' means: \$IDF_PATH/tools/idf.py -p /dev/ttyUSB1 flash monitor"
+    exit
+fi
+
+# check
+if [ $# -gt 1 ]; then
+    ESP_LOGE "unsupported paramter counts:$#, expected see 0 or 1"
+fi
+
+function esp_cmf_all_flash()
+{
+    for sp in /dev/ttyUSB*
+    do {
+        if [ $sp == "/dev/ttyUSB*" ]; then
+            ESP_LOGW "No /dev/ttyUSB* Device!"
+            exit
+        fi
+    }
+    done
+
+    for sp in /dev/ttyUSB*
+    do {
+        one_sp=${sp#*USB}
+        esp_cmf_one_flash $one_sp
+    } &
+    done
+    wait
+}
+
+function esp_cmf_one_flash()
+{
+    if [ -e "/dev/ttyUSB$1" ]; then
+        for((i=1;i<=$try_counts;i++));
+        do {
+            ESP_LOGI "$IDF_PATH/tools/idf.py -p /dev/ttyUSB$1 -b $mf_baud flash..."  \
+            && $IDF_PATH/tools/idf.py -p /dev/ttyUSB$1 -b $mf_baud flash    \
+            && ESP_LOGI "$IDF_PATH/tools/idf.py -p /dev/ttyUSB$1 -b $mf_baud flash Done!" && break
+
+            ESP_LOGW "Try again: $IDF_PATH/tools/idf.py -p /dev/ttyUSB$1 -b $mf_baud flash [$i/$try_counts]"
+
+            if [ $i -eq $try_counts ]; then
+                echo "$IDF_PATH/tools/idf.py -p /dev/ttyUSB$1 -b $mf_baud flash" >> $log_file
+            fi
+        }
+        done
+    else
+        ESP_LOGW "No /dev/ttyUSB$1 Device!"
+        exit
+    fi
+}
+
+# Compile
+ESP_OBJ_CHECK "CMakeLists.txt"
+
+WORK_FOLDER=`pwd`
+WORK_FOLDER=`echo ${WORK_FOLDER##*/}`
+
+# esp-at for cw
+if [ "$WORK_FOLDER" = "esp32s2-at" ]; then
+    # ESP32S2-AT
+    export ESP_AT_PROJECT_PLATFORM=PLATFORM_ESP32S2
+    export ESP_AT_MODULE_NAME=WROOM
+    export ESP_AT_PROJECT_PATH=$(pwd)
+    export IDF_PATH=$ESP_AT_PROJECT_PATH/esp-idf
+    if [ ! -d "build" ]; then
+        esp32s2
+    fi
+
+elif [ "$WORK_FOLDER" = "esp32-at" ]; then
+    # ESP32-AT
+    export ESP_AT_PROJECT_PLATFORM=PLATFORM_ESP32
+    export ESP_AT_MODULE_NAME=WROOM-32
+    export ESP_AT_PROJECT_PATH=$(pwd)
+    export IDF_PATH=$ESP_AT_PROJECT_PATH/esp-idf
+
+elif [ "$WORK_FOLDER" = "esp8266-at" ]; then
+    # ESP8266-AT
+    export ESP_AT_PROJECT_PLATFORM=PLATFORM_ESP8266
+    export ESP_AT_MODULE_NAME=WROOM-02
+    export ESP_AT_PROJECT_PATH=$(pwd)
+    export IDF_PATH=$ESP_AT_PROJECT_PATH/esp-idf
+fi
+
+ESP_IDF_CHECK
+
+CMAKE_PROJECT=`echo $WORK_FOLDER | tr '[a-z]' '[A-Z]'`
+ESP_LOGI "CMake $CMAKE_PROJECT project.."
+
+# idf.py build
+$IDF_PATH/tools/idf.py build || MEXIT "CMake $CMAKE_PROJECT Failed!"
+ESP_LOGIB "CMake project OK!"
+
+ESP_DEL $log_file
+
+# idf.py flash
+if [ $# -eq 0 ]; then
+    esp_cmf_all_flash
+elif [ $# -eq 1 ]; then
+    esp_cmf_one_flash $1
+elif [ $# -gt 1 ]; then
+    ESP_LOGE "unsupported paramter counts:$#, expected see 0 or 1"
+fi
+
+# show result
+if [ -e "$log_file" ]; then
+    ESP_LOGE "Skipped download failed flash, please lookup $log_file!"
+else
+    ESP_LOGI "All flash download OK!"
+fi
+
+# idf.py monitor
+function esp_cmm_one_flash()
+{
+    if [ -e "/dev/ttyUSB$1" ]; then
+        ESP_LOGI "$IDF_PATH/tools/idf.py -p /dev/ttyUSB$1 monitor"
+        $IDF_PATH/tools/idf.py -p /dev/ttyUSB$1 monitor
+    else
+        ESP_LOGW "No /dev/ttyUSB$1 Device!" && exit
+    fi
+}
+
+function esp_cmm_all_flash()
+{
+    for sp in /dev/ttyUSB*
+    do
+    {
+        if [ $sp == "/dev/ttyUSB*" ]; then
+            ESP_LOGE "No /dev/ttyUSB* Device!"
+            exit
+        fi
+
+        spcounts=`ls -al /dev/ttyUSB* | wc -l`
+        if [ $spcounts -eq 1 ]; then
+            ESP_LOGI "$IDF_PATH/tools/idf.py -p $sp monitor"
+            $IDF_PATH/tools/idf.py -p $sp monitor
+        else
+            ESP_LOGI "+$IDF_PATH/tools/idf.py -p $sp monitor"
+            gnome-terminal -x bash -c "export IDF_PATH=$IDF_PATH; echo \"$IDF_PATH/tools/idf.py -p $sp monitor\"; $IDF_PATH/tools/idf.py -p $sp monitor"  
+        fi
+    }
+    done
+}
+
+if [ $# -eq 0 ]; then
+    esp_cmm_all_flash
+elif [ $# -eq 1 ]; then
+    esp_cmm_one_flash $1
+elif [ $# -gt 1 ]; then
+    ESP_LOGE "unsupported paramter counts:$#, expected see 0 or 1"
+fi
