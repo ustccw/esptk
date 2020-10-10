@@ -1,0 +1,75 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/esptk-export
+
+esptk_version=1.1-dev
+
+cd $TK_PATH
+esptk_git=`git describe --tags --dirty`
+cd - > /dev/null
+
+ESP_LOGN "esptk version: $esptk_version"
+ESP_LOGN "esptk git: $esptk_git"
+
+function SHOW_V1.0()
+{
+    ESP_LOGI "-------- esptk v1.0 -----------"
+
+    ESP_LOGN "m: make"
+    ESP_LOGN "cm: idf.py build"
+    ESP_LOGN "ef: esptool.py erase_flash"
+    ESP_LOGN "kp: kill the particular port"
+    ESP_LOGN "kt: kill the task by keyword"
+    ESP_LOGN "mf: make flash"
+    ESP_LOGN "mm: make monitor"
+    ESP_LOGN "st: see the task by keyword"
+    ESP_LOGN "sp: see the particular port"
+
+    ESP_LOGN "cmf: idf.py flash"
+    ESP_LOGN "cmm: idf.py monitor"
+    ESP_LOGN "mmc: make menuconfig"
+    ESP_LOGN "mfm: make flash monitor"
+    ESP_LOGN "idf: prompt IDF_PATH"
+
+    ESP_LOGN "cmmc: idf.py menuconfig"
+    ESP_LOGN "cusb: chmod 777 /dev/ttyUSB*"
+    ESP_LOGN "catn: cat the contents of the nth file"
+    ESP_LOGN "cmfm: idf.py flash monitor"
+    ESP_LOGN "eidf: export IDF_PATH script"
+    ESP_LOGN "gbin: generate bin file"
+    ESP_LOGN "susb: see the /dev/ttyUSB* device"
+
+    ESP_LOGN "esptk: esptk version & changelog"
+    ESP_LOGN "gitcc: git resposity clean"
+
+    ESP_LOGN "esp32s2: idf.py set-target esp32s2"
+    ESP_LOGN "esp-combine-bin.py: combine multi bins into one"
+
+    ESP_LOGI "------------------------------"
+}
+
+function SHOW_PLAN()
+{
+    ESP_LOGI "----------------- Next Release Date: 2021.06.30 -----------------------"
+}
+
+function SHOW_CHANGELOG()
+{
+    ESP_LOGN "*******************************************************************************"
+    ESP_LOGI " esptk: provide a set of cute kits for linux, specially for espressif platform"
+    ESP_LOGN "*******************************************************************************"
+    ESP_LOGB "CHANGE LOG:"
+    
+    SHOW_V1.0
+
+    SHOW_PLAN
+}
+
+# ChangeLog
+if [ "$1" = "-h" ]; then
+    SHOW_CHANGELOG
+fi
