@@ -1,0 +1,20 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/esptk-export
+
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "idf:\n  generate a 'export.sh' script in current directory to export IDF_PATH, help to develop on esp-idf"
+    ESP_LOGN "  'source export.sh' or '. export.sh' to export IDF_PATH"
+    exit
+fi
+
+CUR=$(pwd)
+IDF_PATH=${CUR%/examples*}
+ESP_LOGI "to export IDF_PATH=$IDF_PATH"
+echo "export IDF_PATH=$IDF_PATH" > export.sh
+echo "rm export.sh" >> export.sh
+echo "idf" >> export.sh
