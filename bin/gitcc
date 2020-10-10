@@ -1,0 +1,54 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/esptk-export
+
+# help
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "NAME\n  gitcc:  restore local git repository to the purest environment, without any change"
+    exit
+fi
+
+if [ $# -gt 1 ]; then
+    ESP_LOGE "unsupported paramter counts:$#, expected see 0 or 1"
+    exit
+fi
+
+function gitcc_traversal()
+{
+    cd $1
+    ESP_LOGI "clean traveral in: $(pwd)"
+    git submodule update --init --recursive
+    git reset --hard
+    git clean -xdff
+
+    for item in `git status | grep "modified:" | awk '{print $2}'`
+    do {
+        sub_directory=`realpath $item`
+        cd $sub_directory
+        gitcc_traversal $sub_directory
+        cd -
+    }
+    done
+    cd -
+}
+
+root_path=$(pwd)
+ESP_LOGI "directory: $root_path"
+
+if [ $# -eq 0 ]; then
+    gitcc_traversal $(pwd)
+elif [ $# -eq 1 ]; then
+    gitcc_traversal `realpath $1`
+fi
+
+log=`git status`
+ESP_LOGI "$log"
+
+log=`git describe --tags --dirty`
+ESP_LOGI "$log"
+
+cd $root_path
