@@ -1,0 +1,27 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/esptk-export
+
+# help
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "NAME\n  st: see the task/process include particular keyword\n"
+    ESP_LOGN "  st <keyword>: see the <keyword> related task/process"
+    exit
+fi
+
+if [ $# -ne 1 ]; then
+    ESP_LOGE "unsupported parameter counts:$#, expected see 1"
+fi
+
+if test -z "$(ps -aux | grep $1 | grep -v grep | grep -v esptk)"; then
+    ESP_LOGW "No a task/process include keyword: $1"
+    exit
+else
+    log=`ps -aux | grep $1 | grep -v grep | cut -c -200`
+    ESP_LOGI "Found keyword include $1 task/process..\n$log"
+    exit
+fi
