@@ -1,0 +1,25 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/esptk-export
+
+# help
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "NAME\n  kp: kill a process running on particular port\n"
+    ESP_LOGN "  kp <port>: kill the <port> related process"
+    exit
+fi
+
+if [ $# -ne 1 ]; then
+    ESP_LOGE "unsupported parameter counts:$#, expected see 1"
+fi
+
+if test -z "$(lsof -t -i:$1)"; then
+    ESP_LOGW "No a process running on port=$1"
+    exit
+else
+    kill -9 $(lsof -t -i:$1) && ESP_LOGI "Kill port=$1 OK!" && exit
+fi
