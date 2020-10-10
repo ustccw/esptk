@@ -1,0 +1,54 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/esptk-export
+
+# help
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "NAME\n  cmmc:  \$IDF_PATH/tools/idf.py menuconfig"
+    ESP_LOGN "  Please export \$IDF_PATH firstly if compile on espressif platform"
+    exit
+fi
+
+ESP_OBJ_CHECK "CMakeLists.txt"
+
+WORK_FOLDER=`pwd`
+WORK_FOLDER=`echo ${WORK_FOLDER##*/}`
+
+# esp-at for cw
+if [ "$WORK_FOLDER" = "esp32s2-at" ]; then
+    # ESP32S2-AT
+    export ESP_AT_PROJECT_PLATFORM=PLATFORM_ESP32S2
+    export ESP_AT_MODULE_NAME=WROOM
+    export ESP_AT_PROJECT_PATH=$(pwd)
+    export IDF_PATH=$ESP_AT_PROJECT_PATH/esp-idf
+    if [ ! -d "build" ]; then
+        esp32s2
+    fi
+
+elif [ "$WORK_FOLDER" = "esp32-at" ]; then
+    # ESP32-AT
+    export ESP_AT_PROJECT_PLATFORM=PLATFORM_ESP32
+    export ESP_AT_MODULE_NAME=WROOM-32
+    export ESP_AT_PROJECT_PATH=$(pwd)
+    export IDF_PATH=$ESP_AT_PROJECT_PATH/esp-idf
+
+elif [ "$WORK_FOLDER" = "esp8266-at" ]; then
+    # ESP8266-AT
+    export ESP_AT_PROJECT_PLATFORM=PLATFORM_ESP8266
+    export ESP_AT_MODULE_NAME=WROOM-02
+    export ESP_AT_PROJECT_PATH=$(pwd)
+    export IDF_PATH=$ESP_AT_PROJECT_PATH/esp-idf
+fi
+
+ESP_IDF_CHECK
+
+CMAKE_PROJECT=`echo $WORK_FOLDER | tr '[a-z]' '[A-Z]'`
+ESP_LOGI "Menuconfig $CMAKE_PROJECT project.."
+
+# Menuconfig
+$IDF_PATH/tools/idf.py menuconfig || MEXIT "Menuconfig $CMAKE_PROJECT Failed!"
+ESP_LOGIB "Menuconfig project OK!"
