@@ -1,0 +1,33 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/esptk-export
+
+# help
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "NAME\n  gccv:  see the compiler version of toolchain\n"
+    ESP_LOGN "  include gcc, xtensa-lx106-elf-gcc, xtensa-esp32-elf-gcc, xtensa-esp32s2-elf-gcc, xtensa-esp32s3-elf-gcc, riscv32-esp-elf-gcc"
+    exit
+fi
+
+declare -A toolchain_set
+toolchain_set["Linux"]="gcc"
+toolchain_set["ESP8266"]="xtensa-lx106-elf-gcc"
+toolchain_set["ESP32"]="xtensa-esp32-elf-gcc"
+toolchain_set["ESP32-S2"]="xtensa-esp32s2-elf-gcc"
+toolchain_set["ESP32-S3"]="xtensa-esp32s3-elf-gcc"
+toolchain_set["ESP32-C3"]="riscv32-esp-elf-gcc"
+
+for key in ${!toolchain_set[@]}
+do {
+    if command -v ${toolchain_set[${key}]} > /dev/null 2>&1; then
+        gcc_version=`${toolchain_set[${key}]} -v 2>&1 | tail -n 1 | cut -b 13-`
+        ESP_LOGI "$key gcc version: $gcc_version"
+    else 
+        ESP_LOGW "No $key gcc version found"
+    fi
+}
+done

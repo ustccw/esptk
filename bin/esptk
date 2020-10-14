@@ -42,6 +42,7 @@ function SHOW_V1.0()
     ESP_LOGN "eidf: export IDF_PATH script"
     ESP_LOGN "gbin: generate bin file"
     ESP_LOGN "susb: see the /dev/ttyUSB* device"
+    ESP_LOGN "gccv: see the compiler version of toolchain"
 
     ESP_LOGN "esptk: esptk version & changelog"
     ESP_LOGN "gitcc: git resposity clean"
