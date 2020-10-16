@@ -48,8 +48,8 @@ function SHOW_V1.0()
     ESP_LOGN "gitcc: git resposity clean"
 
     ESP_LOGN "esp32s2: idf.py set-target esp32s2"
+    ESP_LOGN "hexdump2bin: convert the hexdump stream or txt file into binary file"
     ESP_LOGN "esp-combine-bin.py: combine multi bins into one"
-
     ESP_LOGI "------------------------------"
 }
 

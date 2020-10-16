@@ -1,0 +1,78 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/esptk-export
+
+#help
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "NAME\n  hexdump2bin <hex stream or file>: convert the hexdump stream or text file into binary file"
+    ESP_LOGN "  Support to filter special character(s), (space splited, Abbreviation in ASCII): \"CR LF 0x \x \ \" BS ,\"\n"
+
+    ESP_LOGN "  Example A: convert the tcp payload file into the binary file"
+    ESP_LOGB "  hexdump2bin tcp-payload.txt"
+
+    ESP_LOGN "\n  Example B: convert the hex stream into the binary file"
+    ESP_LOGB "  hexdump2bin \"0x55,0xAA,0x55,0xAA\""
+
+    ESP_LOGN "\n  In Wireshark, the Hex Stream can be captured:"
+    ESP_LOGN "  Move to TCP payload -> Right Click -> Choose Copy -> Copy as a Hex Stream or Copy as Escaped String"
+    exit
+fi
+
+if [ $# -ne 1 ]; then
+    ESP_LOGE "unsupported parameter counts:$#, expected see 1"
+fi
+
+# trimmed bin filename
+tbin=esptk-trim.bin
+obin_pre=hex
+
+rm -rf $tbin
+
+:<<!
+# Remove in Order:
+1. CR (0x0D in ASCII)
+2. LF (0x0A in ASCII)
+3. 0x (0x30,0x78 in ASCII)
+4. \x (0x5C,0x78 in ASCII)
+5. \  (0x5C in ASCII)
+6. "  (0x22 in ASCII) 
+7. BS (0x08 in ASCII)
+8. ,  (0x2C in ASCII)
+!
+if [ -f "$1" ]; then
+    ESP_LOGI "Trim File: $1.."
+    cat $1 | tr -d '\r' | tr -d '\n' | sed 's/0x//g' | sed 's/\\x//g' | sed 's/\\//g' | sed 's/\"//g' | sed 's/ //g' | sed 's/,//g' > $tbin
+else
+    ESP_LOGI "Trim Hex Stream.."
+    echo $1 | tr -d '\r' | tr -d '\n' | sed 's/0x//g' | sed 's/\\x//g' | sed 's/\\//g' | sed 's/\"//g' | sed 's/ //g' | sed 's/,//g' > $tbin
+fi
+
+# generate the output hex file
+cat $tbin | xxd -r -ps > $obin_pre.bin
+
+# trimmed file size
+tsize=`wc -c $tbin | awk '{print $1}'`
+# output file size
+osize=`wc -c $obin_pre.bin | awk '{print $1}'`
+# double of output file size
+dsize=$(($osize * 2))
+# remaining file size
+rsize=$(($tsize % 2))
+
+if [ $rsize -gt 0 ]; then
+    ESP_LOGE "Error at odd bytes($tsize) of Hex Stream, Please check $(pwd)/$tbin"
+fi
+
+if [ $tsize -eq $dsize ]; then
+    outfile=`echo $obin_pre-${osize}bytes.bin`
+    mv $obin_pre.bin $outfile
+    rm -rf $tbin
+    ESP_LOGIB "outfile: $(pwd)/$outfile"
+else
+    rm -rf $obin_pre.bin
+    ESP_LOGE "Input File or Hex Stream not supported(trimmed:$tsize ret:$dsize), Please check the trimmed Hex Stream: $(pwd)/$tbin"
+fi
