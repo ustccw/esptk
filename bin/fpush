@@ -1,0 +1,35 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/esptk-export
+
+# check
+if [ $# -ne 1 ]; then
+    ESP_LOGE "Error parameter counts:$#, see as 'fpush -h'"
+    exit
+fi
+
+# help
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "NAME\n  fpush:  git push <target branch> to remote repository by force"
+    ESP_LOGN "  'fpush .': git push current branch to remote repository by force"
+    ESP_LOGN "  'fpush <target branch>': git push target branch to remote repository by force"
+    exit
+fi
+
+current_branch_name=`git rev-parse --abbrev-ref HEAD`
+remote_repo=` git remote -v | grep "fetch" | awk '{print $1}' | head -n 1`
+
+if [ "$1" = "." ]; then
+    fpush_branch_name=$current_branch_name
+else
+    fpush_branch_name=$1
+fi
+
+ESP_LOGI "git push $remote_repo $fpush_branch_name -f .."
+git push $remote_repo $fpush_branch_name -f || ESP_LOGE "Failed to git push"
+
+ESP_LOGI "Git Push $fpush_branch_name Done!"
