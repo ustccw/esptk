@@ -1,0 +1,53 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/esptk-export
+
+# check
+if [ $# -ne 1 ]; then
+    ESP_LOGE "Error parameter counts:$#, see as 'fpull -h'"
+    exit
+fi
+
+# help
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "NAME\n  fpull:  git pull & checkout <target branch> by force"
+    ESP_LOGN "  'fpull .': git pull current branch by force"
+    ESP_LOGN "  'fpull <target branch>': git pull target branch and checkout by force"
+    exit
+fi
+
+esptk_temp_branch_name='esptk/fpull/temporary'
+current_branch_name=`git rev-parse --abbrev-ref HEAD`
+remote_repo=` git remote -v | grep "fetch" | awk '{print $1}' | head -n 1`
+
+if [ "$1" = "." ]; then
+    fpull_branch_name=$current_branch_name
+else
+    fpull_branch_name=$1
+fi
+
+git reset --hard
+
+if [ "$fpull_branch_name" == "$current_branch_name" ]; then
+    git checkout -b $esptk_temp_branch_name
+    git branch -D $fpull_branch_name
+    git checkout $fpull_branch_name
+    git branch -D $esptk_temp_branch_name
+    ESP_LOGI "git pull $remote_repo:$fpull_branch_name.."
+    git pull $remote_repo $fpull_branch_name || ESP_LOGE "Failed to git pull"
+    ESP_LOGI "git summodule update.."
+    gitcc
+else
+    git branch -D $fpull_branch_name || ESP_LOGE "Failed to delete branch: $fpull_branch_name"
+    git checkout $fpull_branch_name || ESP_LOGE "Failed to git checkout"
+    ESP_LOGI "git pull $remote_repo:$fpull_branch_name.."
+    git pull $remote_repo $fpull_branch_name || ESP_LOGE "Failed to git pull"
+    ESP_LOGI "git summodule update.."
+    gitcc
+fi
+
+ESP_LOGI "FPULL $fpull_branch_name DONE!"
