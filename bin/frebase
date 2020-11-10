@@ -1,0 +1,51 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/esptk-export
+
+# check
+if [ $# -gt 2 -o $# -lt 1 ]; then
+    ESP_LOGE "Error parameter counts:$#, see as 'frebase -h'"
+fi
+
+# help
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "NAME\n  frebase <n> [<-p>]:  git rebase n commits into one by force, push to remote optional"
+    ESP_LOGN "  Example A: combine latest 3 commits into one, and use the fist commit message, NOT push to the remote"
+    ESP_LOGB "    frebase 3"
+    ESP_LOGN "  Example B: combine latest 5 commits into one, and use the fist commit message, push to the remote"
+    ESP_LOGB "    frebase 5 -p"
+    exit
+fi
+
+git branch --contains HEAD~$1 >/dev/null 2>&1 || ESP_LOGE "No HEAD~$1 commit found!"
+
+if [ $1 -eq 0 ]; then
+    ESP_LOGE "Error second parameter $1, see as 'frebase -h'"
+fi
+
+# rebase
+git reset --hard
+git_msg=`echo $1-1 | bc | xargs -i git show -s --format=%B HEAD~{}`
+git reset --soft HEAD~$1 || ESP_LOGE "failed to git reset --soft"
+git commit -m "$git_msg" || ESP_LOGE "Commit Fail"
+
+log=`git log -1 --name-only`
+ESP_LOGI "After force rebase, New Commit Changes is:\n$log"
+
+# git push
+if [ $# -eq 2 ]; then
+    if [ $2 == "-p" ]; then
+        current_branch_name=`git rev-parse --abbrev-ref HEAD`
+        remote_repo=` git remote -v | grep "fetch" | awk '{print $1}' | head -n 1`
+        ESP_LOGI "git push $remote_repo $current_branch_name -f .."
+        git push $remote_repo $current_branch_name -f || ESP_LOGE "Failed to git push"
+        ESP_LOGI "Git Push $current_branch_name Done!"
+    else
+        ESP_LOGE "Error second parameter $2, see as 'frebase -h'"
+        exit
+    fi
+fi
