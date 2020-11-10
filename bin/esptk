@@ -17,7 +17,7 @@ ESP_LOGN "esptk git: $esptk_git"
 
 function SHOW_V1.0()
 {
-    ESP_LOGI "-------- esptk v1.0 -----------"
+    ESP_LOGI "------------------------------ esptk v1.0 -----------------------------"
 
     ESP_LOGN "m: make"
     ESP_LOGN "cm: idf.py build"
@@ -50,7 +50,16 @@ function SHOW_V1.0()
     ESP_LOGN "esp32s2: idf.py set-target esp32s2"
     ESP_LOGN "hexdump2bin: convert the hexdump stream or txt file into binary file"
     ESP_LOGN "esp-combine-bin.py: combine multi bins into one"
-    ESP_LOGI "------------------------------"
+    ESP_LOGI "-----------------------------------------------------------------------"
+}
+
+function SHOW_ONGOING()
+{
+    ESP_LOGI "------------------------- ongoing items -------------------------------"
+    ESP_LOGN "fpull: git pull by force"
+    ESP_LOGN "fpush: git push by force"
+    ESP_LOGN "frebase: git rebase -i by force"
+    ESP_LOGI "-----------------------------------------------------------------------"
 }
 
 function SHOW_PLAN()
@@ -66,6 +75,8 @@ function SHOW_CHANGELOG()
     ESP_LOGB "CHANGE LOG:"
     
     SHOW_V1.0
+
+    SHOW_ONGOING
 
     SHOW_PLAN
 }
