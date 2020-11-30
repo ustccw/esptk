@@ -1,0 +1,47 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/esptk-export
+
+# check
+if [ $# -gt 2 -o $# -lt 0 ]; then
+    ESP_LOGE "Error parameter counts:$#, see as 'fsubmit -h'"
+fi
+
+# help
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "NAME\n  fsubmit [n]: force to submit local changes not staged to remote repository with rebase latest <n> commits into one"
+    ESP_LOGN "  default value of [n] is 2\r\n"
+
+    ESP_LOGN "  Example A: git add and git commit local changes, then combine latest 2 commits into one, and use the fist commit message, push to the remote"
+    ESP_LOGB "    fsubmit\r\n"
+
+    ESP_LOGN "  Example B: git add and git commit local changes, then combine latest 5 commits into one, and use the fist commit message, push to the remote"
+    ESP_LOGB "    fsubmit 5"
+    exit
+fi
+
+to_rebase_cnt=2
+
+if [ $# -eq 1 ]; then
+    to_rebase_cnt=$1
+fi
+
+git add .
+git commit -m ".." || ESP_LOGE "Cancel the Force submit!"
+
+prompt_msg=`git log -n $to_rebase_cnt --name-only`
+ESP_LOGN "$prompt_msg"
+ESP_LOGW "Will rebase the above commits into one, and push to the remote repo, press [y/n] to continue.."
+
+read input
+
+if [ "$input" = "N" -o "$input" = "n" ]; then
+    ESP_LOGI "Cancel the Rebase Commits, Please Check it!"
+    exit
+fi
+
+frebase $to_rebase_cnt -p
