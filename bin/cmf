@@ -74,31 +74,32 @@ ESP_OBJ_CHECK "CMakeLists.txt"
 
 WORK_FOLDER=`pwd`
 WORK_FOLDER=`echo ${WORK_FOLDER##*/}`
+ESP_AT_ENABLE=0
 
 # esp-at for cw
 if [ "$WORK_FOLDER" = "esp32s2-at" ]; then
     # ESP32S2-AT
-    export ESP_AT_PROJECT_PLATFORM=PLATFORM_ESP32S2
-    export ESP_AT_MODULE_NAME=WROOM
+    ESP_AT_ENABLE=1
     export ESP_AT_PROJECT_PATH=$(pwd)
     export IDF_PATH=$ESP_AT_PROJECT_PATH/esp-idf
-    if [ ! -d "build" ]; then
-        esp32s2
-    fi
+    mkdir -p build
+    echo "{\"platform\": \"PLATFORM_ESP32S2\", \"module\": \"WROOM\", \"silence\": 0}" > build/module_info.json
 
 elif [ "$WORK_FOLDER" = "esp32-at" ]; then
     # ESP32-AT
-    export ESP_AT_PROJECT_PLATFORM=PLATFORM_ESP32
-    export ESP_AT_MODULE_NAME=WROOM-32
+    ESP_AT_ENABLE=1
     export ESP_AT_PROJECT_PATH=$(pwd)
     export IDF_PATH=$ESP_AT_PROJECT_PATH/esp-idf
+    mkdir -p build
+    echo "{\"platform\": \"PLATFORM_ESP32\", \"module\": \"WROOM-32\", \"silence\": 0}" > build/module_info.json
 
 elif [ "$WORK_FOLDER" = "esp8266-at" ]; then
     # ESP8266-AT
-    export ESP_AT_PROJECT_PLATFORM=PLATFORM_ESP8266
-    export ESP_AT_MODULE_NAME=WROOM-02
+    ESP_AT_ENABLE=1
     export ESP_AT_PROJECT_PATH=$(pwd)
     export IDF_PATH=$ESP_AT_PROJECT_PATH/esp-idf
+    mkdir -p build
+    echo "{\"platform\": \"PLATFORM_ESP8266\", \"module\": \"WROOM-02\", \"silence\": 0}" > build/module_info.json
 fi
 
 ESP_IDF_CHECK
@@ -107,7 +108,12 @@ CMAKE_PROJECT=`echo $WORK_FOLDER | tr '[a-z]' '[A-Z]'`
 ESP_LOGI "CMake $CMAKE_PROJECT project.."
 
 # compile
-$IDF_PATH/tools/idf.py build || MEXIT "CMake $CMAKE_PROJECT Failed!"
+if [ $ESP_AT_ENABLE -eq 0 ]; then
+    $IDF_PATH/tools/idf.py build || MEXIT "CMake $CMAKE_PROJECT Failed!"
+else
+    ./build.py build || MEXIT "CMake $CMAKE_PROJECT Failed!"
+fi
+
 ESP_LOGIB "CMake project OK!"
 # ------------------------------------------------
 

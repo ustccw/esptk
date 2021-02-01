@@ -57,9 +57,6 @@ if [ "$WORK_FOLDER" = "esp32s2-at" ]; then
     export ESP_AT_MODULE_NAME=WROOM
     export ESP_AT_PROJECT_PATH=$(pwd)
     export IDF_PATH=$ESP_AT_PROJECT_PATH/esp-idf
-    if [ ! -d "build" ]; then
-        esp32s2
-    fi
 
 elif [ "$WORK_FOLDER" = "esp32-at" ]; then
     # ESP32-AT
