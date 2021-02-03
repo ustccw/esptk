@@ -1,0 +1,99 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/esptk-export
+
+oauth_token=""
+github_token_file=~/.github_oauth_token
+artifact_list_file=at_artifact.list
+
+# According to https://docs.github.com/en/rest/reference/actions
+preset_header="Accept: application/vnd.github.v3+json"
+artifact_url=https://api.github.com/repos/espressif/esp-at/actions/artifacts
+
+# help
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "NAME\n  at-download: Download the latest artifacts of esp-at project from GitHub Actions\n"
+    ESP_LOGB "  Prerequisite 1:"
+    ESP_LOGN "  Visit https://github.com/settings/tokens and generate a personal access token to use with script."
+    ESP_LOGN "  Choose \"repo\" and \"workflow\" as the scopes. Copy this token, don't lose it or you'll need to generate a new one."
+    ESP_LOGN "  Create a config file in your home directory. The default is $github_token_file on Linux."
+    ESP_LOGN "  Paste the token to $github_token_file and save (token should be composed of 40 characters, including only 0-9 and A-Z)."
+
+    ESP_LOGB "  Prerequisite 2:"
+    ESP_LOGN "  Install the json parser by 'sudo apt install jq'"
+    exit
+fi
+
+# token check
+if [ -e $github_token_file ]; then
+    oauth_token=`cat ~/.github_oauth_token`
+    ESP_LOGI "Token is $oauth_token"
+else
+    ESP_LOGE "No GitHub OAuth token found! More see as 'at-download -h'"
+fi
+
+# user configuration
+declare -A module_list
+module_list["0"]="esp8266-wroom02-at"
+module_list["1"]="esp32-wroom-at"
+module_list["2"]="esp32s2-wroom-at"
+module_list["3"]="esp32-d2wd-at"
+module_list["4"]="esp32-mini-1-at"
+module_list["5"]="esp32-pico-d4-at"
+module_list["6"]="esp32-solo-1-at"
+module_list["7"]="esp32-wrover-at"
+module_list["8"]="esp32s2-mini-at"
+module_list["9"]="esp32s2-solo-at"
+module_list["10"]="esp32s2-wrover-at"
+module_list["11"]="esp8266-wroom-5V2L-at"
+module_list["12"]="esp8266-wroom02-n-at"
+module_list["13"]="esp8285-1MB-at"
+
+for key in ${!module_list[@]}
+do {
+    ESP_LOGN "$key: ${module_list[${key}]}"
+}
+done
+
+ESP_LOGN "Select the firmware you would like to download by index (0-13, default 0):"
+read input
+if [ -z $input ]; then
+    input=0
+fi
+
+dst_module_name=${module_list[${input}]}
+ESP_LOGI "Module Name: $dst_module_name"
+
+# download artifact list
+ESP_LOGI "Ready to Download Latest Artifact from GitGub Actions.."
+wget --header="$preset_header" $artifact_url -O $artifact_list_file || ESP_LOGE "WGet CI Artifacts Failed"
+
+node_cnt=`cat $artifact_list_file | jq ".artifacts | length"`
+ESP_LOGI "Found $node_cnt nodes."
+
+for i in $(seq ${node_cnt})
+do {
+    current_module_name=`cat $artifact_list_file | jq -r .artifacts[$i-1].name`
+    if [ $current_module_name == $dst_module_name ]; then
+        firmware_id=`cat $artifact_list_file | jq -r .artifacts[$i-1].id`
+        archive_download_url=`cat $artifact_list_file | jq -r .artifacts[$i-1].archive_download_url`
+        ESP_LOGI "Found URL for module:$dst_module_name is $archive_download_url (ID:$firmware_id)"
+        break
+    fi
+}
+done
+
+dst_dir=${dst_module_name}_${firmware_id}
+dst_zip=${dst_dir}.zip
+
+# download the firmware packet
+token_header="Authorization: token $oauth_token"
+wget --header="$preset_header" --header="$token_header" $archive_download_url -O $dst_zip || ESP_LOGE "WGet Firmware Packet Failed"
+
+unzip $dst_zip -d ${dst_module_name}_${firmware_id}
+abs_dst_path=`realpath $dst_dir/factory/*.bin`
+ESP_LOGIB "Latest $dst_module_name firmware successfully downloaded! ----> $abs_dst_path"
