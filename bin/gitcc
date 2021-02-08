@@ -21,9 +21,10 @@ function gitcc_traversal()
 {
     cd $1
     ESP_LOGI "clean traveral in: $(pwd)"
-    git submodule update --init --recursive
     git reset --hard
     git clean -xdff
+    git submodule sync
+    git submodule update --init --recursive
 
     for item in `git status | grep "modified:" | awk '{print $2}'`
     do {
