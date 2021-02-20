@@ -1,0 +1,21 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/esptk-export
+
+# help
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "NAME\n  esp32c3: \$IDF_PATH/tools/idf.py set-target esp32c3"
+    ESP_LOGN "  Please export \$IDF_PATH firstly if compile on espressif platform"
+    exit
+fi
+
+if [ $IDF_PATH ]; then
+    ESP_LOGI "$IDF_PATH/tools/idf.py set-target esp32c3"
+    $IDF_PATH/tools/idf.py set-target esp32c3
+else
+    ESP_LOGW "No \$IDF_PATH found, Please export \$IDF_PATH firstly!!!"
+fi
