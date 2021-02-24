@@ -65,6 +65,14 @@ elif [ "$WORK_FOLDER" = "esp32-at" ]; then
     export ESP_AT_PROJECT_PATH=$(pwd)
     export IDF_PATH=$ESP_AT_PROJECT_PATH/esp-idf
 
+elif [ "$WORK_FOLDER" = "esp32c3-at" ]; then
+    # ESP32C3-AT
+    ESP_AT_ENABLE=1
+    export ESP_AT_PROJECT_PATH=$(pwd)
+    export IDF_PATH=$ESP_AT_PROJECT_PATH/esp-idf
+    mkdir -p build
+    echo "{\"platform\": \"PLATFORM_ESP32C3\", \"module\": \"MINI-1\", \"silence\": 0}" > build/module_info.json
+
 elif [ "$WORK_FOLDER" = "esp8266-at" ]; then
     # ESP8266-AT
     export ESP_AT_PROJECT_PLATFORM=PLATFORM_ESP8266
