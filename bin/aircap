@@ -1,0 +1,27 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/esptk-export
+
+# help
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "NAME\n  aircap:  aircap <nic> <channel>\n"
+    ESP_LOGN "  nic: get its name by ifconfig"
+    ESP_LOGN "  channel: 1-14"
+    exit
+fi
+
+# check
+if [ $# -ne 2 ]; then
+    ESP_LOGE "error parameter counts:$#, see as 'aircap -h'"
+fi
+
+sudo ifconfig $1 down || ESP_LOGE "No such a $1 NIC"
+sudo iwconfig $1 mode monitor || ESP_LOGE "can not support $1 to sniffer mode"
+sudo iwconfig $1 channel $2 || ESP_LOGW "enable channel to $2 error"
+sudo ifconfig $1 up
+ESP_LOGI "chose NIC: <$1> to capture after wireshark started."
+sudo wireshark
