@@ -84,7 +84,7 @@ if [ $# -eq 0 ]; then
 elif [ $# -eq 1 ]; then
     esp_make_one_flash $1
 elif [ $# -gt 1 ]; then
-    ESP_LOGE "unsupported paramter counts:$#, expected see 0 or 1"
+    ESP_LOGE "unsupported parameter counts:$#, expected see 0 or 1"
 fi
 
 # show result
