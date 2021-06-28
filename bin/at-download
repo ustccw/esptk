@@ -6,6 +6,9 @@ TK_PATH=`realpath $0`
 TK_PATH=`echo ${TK_PATH%/bin*}`
 source $TK_PATH/bin/esptk-export
 
+# variables
+s_download_flag=0
+flash_baud_rate=921600
 oauth_token=""
 github_token_file=~/.github_oauth_token
 artifact_list_file=at_artifact.list
@@ -17,6 +20,9 @@ artifact_url=https://api.github.com/repos/espressif/esp-at/actions/artifacts
 # help
 if [ "$1" = "-h" ]; then
     ESP_LOGB "NAME\n  at-download: Download the latest artifacts of esp-at project from GitHub Actions\n"
+    ESP_LOGN "  at-download: just download the firmware"
+    ESP_LOGN "  at-download [x]: download the firmware and write flash by /dev/ttyUSBx\r\n"
+
     ESP_LOGB "  Prerequisite 1:"
     ESP_LOGN "  Visit https://github.com/settings/tokens and generate a personal access token to use with script."
     ESP_LOGN "  Choose \"repo\" and \"workflow\" as the scopes. Copy this token, don't lose it or you'll need to generate a new one."
@@ -34,6 +40,20 @@ if [ -e $github_token_file ]; then
     ESP_LOGI "Token is $oauth_token"
 else
     ESP_LOGE "No GitHub OAuth token found! More see as 'at-download -h'"
+fi
+
+# download check
+if [ $# -eq 0 ]; then
+    s_download_flag=0
+elif [ $# -eq 1 ]; then
+    if [ -e "/dev/ttyUSB$1" ]; then
+        s_download_flag=1
+    else
+        ESP_LOGW "No /dev/ttyUSB$1"
+        exit
+    fi
+elif [ $# -gt 1 ]; then
+    ESP_LOGE "unsupported parameter counts: $#"
 fi
 
 # user configuration
@@ -59,7 +79,7 @@ do {
 }
 done
 
-ESP_LOGN "Select the firmware you would like to download by index (0-13, default 0):"
+echo -n  "Select the latest firmware you would like to download by index (0-13, default 0): "
 read input
 if [ -z $input ]; then
     input=0
@@ -69,7 +89,8 @@ dst_module_name=${module_list[${input}]}
 ESP_LOGI "Module Name: $dst_module_name"
 
 # download artifact list
-ESP_LOGI "Ready to Download Latest Artifact from GitGub Actions.."
+ESP_LOGI "Ready to Download Latest Artifact List from GitGub Actions.."
+rm -rf $artifact_list_file
 wget --header="$preset_header" $artifact_url -O $artifact_list_file || ESP_LOGE "WGet CI Artifacts Failed"
 
 node_cnt=`cat $artifact_list_file | jq ".artifacts | length"`
@@ -81,7 +102,7 @@ do {
     if [ $current_module_name == $dst_module_name ]; then
         firmware_id=`cat $artifact_list_file | jq -r .artifacts[$i-1].id`
         archive_download_url=`cat $artifact_list_file | jq -r .artifacts[$i-1].archive_download_url`
-        ESP_LOGI "Found URL for module:$dst_module_name is $archive_download_url (ID:$firmware_id)"
+        ESP_LOGI "Found URL for module: $dst_module_name ----> $archive_download_url (ID: $firmware_id)"
         break
     fi
 }
@@ -89,11 +110,24 @@ done
 
 dst_dir=${dst_module_name}_${firmware_id}
 dst_zip=${dst_dir}.zip
+rm -rf $dst_dir $dst_zip
 
 # download the firmware packet
+ESP_LOGI "Ready to Download Latest Firmware from GitGub Actions.."
 token_header="Authorization: token $oauth_token"
 wget --header="$preset_header" --header="$token_header" $archive_download_url -O $dst_zip || ESP_LOGE "WGet Firmware Packet Failed"
 
-unzip $dst_zip -d ${dst_module_name}_${firmware_id}
+unzip $dst_zip -d $dst_dir
 abs_dst_path=`realpath $dst_dir/factory/*.bin`
 ESP_LOGIB "Latest $dst_module_name firmware successfully downloaded! ----> $abs_dst_path"
+
+# flash to chip
+if [ $s_download_flag -eq 1 ]; then
+    ESP_LOGI "Ready to flash firmware to chip by /dev/ttyUSB$1.."
+    ESP_LOGI "esptool.py --port /dev/ttyUSB$1 --baud $flash_baud_rate write_flash 0x0 $abs_dst_path.."
+    esptool.py --port /dev/ttyUSB$1 --baud $flash_baud_rate write_flash 0x0 $abs_dst_path || ESP_LOGE "Flash Firmware Failed"
+    ESP_LOGIB "Latest firmware successfully flashed to chip!"
+else
+    ESP_LOGN "All done! Please run:\r\n"
+    ESP_LOGN "  esptool.py --port [PORT] --baud $flash_baud_rate write_flash 0x0 $abs_dst_path\r\n"
+fi
