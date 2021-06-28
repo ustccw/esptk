@@ -1,0 +1,112 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/esptk-export
+
+# variables
+s_download_flag=0
+flash_baud_rate=921600
+s_url_prefix="https://download.espressif.com/esp_at/firmware/"
+declare -A module_list
+
+# help
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "NAME\n  at-released: Download the released firmware of esp-at project from AT Binary Lists\n"
+    ESP_LOGN "  at-released: just download the firmware"
+    ESP_LOGN "  at-released [x]: download the firmware and write flash by /dev/ttyUSBx"
+    exit
+fi
+
+# download check
+if [ $# -eq 0 ]; then
+    s_download_flag=0
+elif [ $# -eq 1 ]; then
+    if [ -e "/dev/ttyUSB$1" ]; then
+        s_download_flag=1
+    else
+        ESP_LOGW "No /dev/ttyUSB$1"
+        exit
+    fi
+elif [ $# -gt 1 ]; then
+    ESP_LOGE "unsupported parameter counts: $#"
+fi
+
+# v2.2.0.0
+module_list["1"]="ESP32-WROOM-32 (v2.2.0.0)    |    ESP32/ESP32_WROOM/ESP32-WROOM-32_AT_Bin_V2.2.0.0.zip"
+module_list["2"]="ESP32-C3-MINI-1 (v2.2.0.0)   |    ESP32C3/ESP32-C3-MINI-1_AT_Bin_V2.2.0.0.zip"
+module_list["3"]="ESP-WROOM-02 (v2.2.0.0)      |    ESP8266/ESP8266-IDF-AT_V2.2.0.0.zip"
+
+# v2.1.0.0
+module_list["4"]="ESP32-WROOM-32 (v2.1.0.0)    |    ESP32/ESP32_WROOM/ESP32-WROOM-32_AT_Bin_V2.1.0.0.zip"
+module_list["5"]="ESP-WROOM-02 (v2.1.0.0)      |    ESP8266/ESP8266-IDF-AT_V2.1.0.0.zip"
+module_list["6"]="ESP32-S2-WROOM (v2.1.0.0)    |    ESP32S2/ESP32-S2-WROOM/ESP32-S2-WROOM_AT_Bin_V2.1.0.0.zip"
+
+# v2.0.0.0
+module_list["7"]="ESP32-WROOM-32 (v2.0.0.0)    |    ESP32/ESP32_WROOM/ESP32-WROOM-32_AT_Bin_V2.0.zip"
+module_list["8"]="ESP-WROOM-02 (v2.0.0.0)      |    ESP8266/ESP8266-IDF-AT_V2.0_0.zip"
+
+# others
+module_list["9"]="ESP32-WROVER-32 (v2.1.0.0)   |    ESP32/ESP32_WROVER/ESP32-WROVER_AT_Bin_V2.1.0.0.zip"
+module_list["10"]="ESP32-PICO (v2.1.0.0)       |    ESP32/ESP32_PICO_D4/ESP32-PICO-D4_AT_Bin_V2.1.0.0.zip"
+module_list["11"]="ESP32-SOLO (v2.1.0.0)       |    ESP32/ESP32_SOLO/ESP32-SOLO_AT_Bin_V2.1.0.0.zip"
+module_list["12"]="ESP32-S2-WROVER (v2.1.0.0)  |    ESP32S2/ESP32-S2-WROVER/ESP32-S2-WROVER_AT_Bin_V2.1.0.0.zip"
+module_list["13"]="ESP32-S2-SOLO (v2.1.0.0)    |    ESP32S2/ESP32-S2-SOLO/ESP32-S2-SOLO_AT_Bin_V2.1.0.0.zip"
+module_list["14"]="ESP32-S2-MINI (v2.1.0.0)    |    ESP32S2/ESP32-S2-MINI/ESP32-S2-MINI_AT_Bin_V2.1.0.0.zip"
+module_list["15"]="ESP32-WROVER-32 (v2.0.0.0)  |    ESP32/ESP32_WROVER/ESP32-WROVER_AT_Bin_V2.0.zip"
+module_list["16"]="ESP32-PICO (v2.0.0.0)       |    ESP32/ESP32_PICO_D4/ESP32-PICO-D4_AT_Bin_V2.0.zip"
+module_list["17"]="ESP32-SOLO (v2.0.0.0)       |    ESP32/ESP32_SOLO/ESP32-SOLO_AT_Bin_V2.0.zip"
+
+module_counts=${#module_list[*]}
+
+# prompt
+for key in $(seq 1 $module_counts)
+do {
+    value=${module_list[${key}]}
+    ESP_LOGI "${key}: ${value%|*}"
+}
+done
+
+echo -n "Select the released firmware you would like to download by index (default 1): "
+read input
+if [ -z $input ]; then
+    input=1
+fi
+
+# calculate url by input
+dst_module_info=${module_list[${input}]}
+dst_module_name=${dst_module_info%|*}
+
+stripped_value=`echo $dst_module_info | sed s/[[:space:]]//g`
+s_url_suffix="${stripped_value#*|}"
+s_firmware_url="${s_url_prefix}${s_url_suffix}"
+
+ESP_LOGW "Selected Module (${input}): $dst_module_name"
+ESP_LOGI "Ready to Download Released Firmware from AT Binary Lists.."
+
+# download
+dst_zip=${s_firmware_url##*/}
+rm -rf $dst_zip
+echo "zip is $dst_zip"
+wget $s_firmware_url -O $dst_zip || ESP_LOGE "WGet Released Firmware Failed"
+
+dst_dir=${dst_zip%.*}
+echo "dst dir is $dst_dir"
+
+rm -rf $dst_dir
+unzip $dst_zip -d ${dst_dir}
+abs_dst_path=`find ${dst_dir} -name "*factory*.bin" | grep -v MACOS | grep -v param | xargs realpath`
+ESP_LOGIB "Released firmware successfully downloaded! ----> $abs_dst_path"
+
+# flash to chip
+if [ $s_download_flag -eq 1 ]; then
+    ESP_LOGI "Ready to flash firmware to chip by /dev/ttyUSB$1.."
+    ESP_LOGI "esptool.py --port /dev/ttyUSB$1 --baud $flash_baud_rate write_flash 0x0 $abs_dst_path.."
+    esptool.py --port /dev/ttyUSB$1 --baud $flash_baud_rate write_flash 0x0 $abs_dst_path || ESP_LOGE "Flash Firmware Failed"
+    ESP_LOGIB "Released firmware successfully flashed to chip!"
+else
+    ESP_LOGN "All done! Please run:\r\n"
+    ESP_LOGN "  esptool.py --port [PORT] --baud $flash_baud_rate write_flash 0x0 $abs_dst_path\r\n"
+fi
