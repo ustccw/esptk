@@ -8,7 +8,7 @@ source $TK_PATH/bin/esptk-export
 
 # help
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\n  st: see the task/process include particular keyword\n"
+    ESP_LOGB "NAME\r\n  st: see the task/process include particular keyword\r\n"
     ESP_LOGN "  st <keyword>: see the <keyword> related task/process"
     exit
 fi
@@ -22,6 +22,6 @@ if test -z "$(ps -aux | grep $1 | grep -v grep | grep -v esptk)"; then
     exit
 else
     log=`ps -aux | grep $1 | grep -v grep | cut -c -200`
-    ESP_LOGI "Found keyword include $1 task/process..\n$log"
+    ESP_LOGI "Found keyword include $1 task/process..\r\n$log"
     exit
 fi

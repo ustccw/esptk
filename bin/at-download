@@ -19,7 +19,7 @@ artifact_url=https://api.github.com/repos/espressif/esp-at/actions/artifacts
 
 # help
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\n  at-download: Download the latest artifacts of esp-at project from GitHub Actions\n"
+    ESP_LOGB "NAME\r\n  at-download: Download the latest artifacts of esp-at project from GitHub Actions\r\n"
     ESP_LOGN "  at-download: just download the firmware"
     ESP_LOGN "  at-download [x]: download the firmware and write flash by /dev/ttyUSBx\r\n"
 

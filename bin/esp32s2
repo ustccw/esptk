@@ -8,7 +8,7 @@ source $TK_PATH/bin/esptk-export
 
 # help
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\n  esp32s2:  \$IDF_PATH/tools/idf.py set-target esp32s2"
+    ESP_LOGB "NAME\r\n  esp32s2:  \$IDF_PATH/tools/idf.py set-target esp32s2"
     ESP_LOGN "  Please export \$IDF_PATH firstly if compile on espressif platform"
     exit
 fi

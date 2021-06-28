@@ -56,7 +56,7 @@ function esp_erase_one_flash()
 }
 
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME:\n  ef: esptool.py --port /dev/ttyUSB* --baud $erase_baud erase_flash\n"
+    ESP_LOGB "NAME:\r\n  ef: esptool.py --port /dev/ttyUSB* --baud $erase_baud erase_flash\r\n"
     ESP_LOGN "  ef : erase all flash"
     ESP_LOGN "  ef [x]: erase one flash by index 'x', such as 'ef 1' means: erase flash by /dev/ttyUSB1"
     exit

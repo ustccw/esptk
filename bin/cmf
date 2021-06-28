@@ -57,7 +57,7 @@ function esp_cmake_one_flash()
 }
 
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\n  cmf: \$IDF_PATH/tools/idf.py -p /dev/ttyUSB* flash\n"
+    ESP_LOGB "NAME\r\n  cmf: \$IDF_PATH/tools/idf.py -p /dev/ttyUSB* flash\r\n"
     ESP_LOGN "  cmf : CMake and flash to all device"
     ESP_LOGN "  cmf [x]: CMake and flash to one device by index 'x', such as 'cmf 1' means: \$IDF_PATH/tools/idf.py -p /dev/ttyUSB1 flash"
     exit

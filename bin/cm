@@ -8,7 +8,7 @@ source $TK_PATH/bin/esptk-export
 
 # help
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\n  cm:  \$IDF_PATH/tools/idf.py build"
+    ESP_LOGB "NAME\r\n  cm:  \$IDF_PATH/tools/idf.py build"
     ESP_LOGN "  Please export \$IDF_PATH firstly if compile on espressif platform"
     exit
 fi

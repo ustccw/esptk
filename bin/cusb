@@ -7,7 +7,7 @@ TK_PATH=`echo ${TK_PATH%/bin*}`
 source $TK_PATH/bin/esptk-export
 
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME:\n  cm: chmod 777 /dev/ttyUSB*"
+    ESP_LOGB "NAME:\r\n  cm: chmod 777 /dev/ttyUSB*"
     exit
 fi
 

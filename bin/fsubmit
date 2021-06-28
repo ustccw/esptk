@@ -13,7 +13,7 @@ fi
 
 # help
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\n  fsubmit [n]: force to submit local changes not staged to remote repository with rebase latest <n> commits into one"
+    ESP_LOGB "NAME\r\n  fsubmit [n]: force to submit local changes not staged to remote repository with rebase latest <n> commits into one"
     ESP_LOGN "  default value of [n] is 2\r\n"
 
     ESP_LOGN "  Example A: git add and git commit local changes, then combine latest 2 commits into one, and use the fist commit message, push to the remote"

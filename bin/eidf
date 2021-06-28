@@ -7,7 +7,7 @@ TK_PATH=`echo ${TK_PATH%/bin*}`
 source $TK_PATH/bin/esptk-export
 
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "eidf:\n  generate a 'export.sh' script in current directory to export IDF_PATH, help to develop on esp-idf"
+    ESP_LOGB "eidf:\r\n  generate a 'export.sh' script in current directory to export IDF_PATH, help to develop on esp-idf"
     ESP_LOGN "  'source export.sh' or '. export.sh' to export IDF_PATH"
     exit
 fi

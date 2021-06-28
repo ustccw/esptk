@@ -8,7 +8,7 @@ source $TK_PATH/bin/esptk-export
 
 # help
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\n  mmc:  make menuconfig\n"
+    ESP_LOGB "NAME\r\n  mmc:  make menuconfig\r\n"
     ESP_LOGN "  Please export IDF_PATH if compile on espressif platform"
     exit
 fi

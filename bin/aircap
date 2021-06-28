@@ -8,7 +8,7 @@ source $TK_PATH/bin/esptk-export
 
 # help
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\n  aircap:  aircap <nic> <channel>\n"
+    ESP_LOGB "NAME\r\n  aircap:  aircap <nic> <channel>\r\n"
     ESP_LOGN "  nic: get its name by ifconfig"
     ESP_LOGN "  channel: 1-14"
     exit

@@ -7,7 +7,7 @@ TK_PATH=`echo ${TK_PATH%/bin*}`
 source $TK_PATH/bin/esptk-export
 
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\n  mm: make monitor ESPPORT=/dev/ttyUSB*\n"
+    ESP_LOGB "NAME\r\n  mm: make monitor ESPPORT=/dev/ttyUSB*\r\n"
     ESP_LOGN "  mm : make monitor on all device"
     ESP_LOGN "  mm [x]: make monitor by index 'x', such as 'mm 0' means: make monitor /dev/ttyUSB0"
     exit

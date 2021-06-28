@@ -14,7 +14,7 @@ fi
 
 # help
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\n  fpull:  git pull & checkout <target branch> by force"
+    ESP_LOGB "NAME\r\n  fpull:  git pull & checkout <target branch> by force"
     ESP_LOGN "  'fpull .': git pull current branch by force"
     ESP_LOGN "  'fpull <target branch>': git pull target branch and checkout by force"
     exit

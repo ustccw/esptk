@@ -7,7 +7,7 @@ TK_PATH=`echo ${TK_PATH%/bin*}`
 source $TK_PATH/bin/esptk-export
 
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\n  cmm: \$IDF_PATH/tools/idf.py -p /dev/ttyUSB* monitor\n"
+    ESP_LOGB "NAME\r\n  cmm: \$IDF_PATH/tools/idf.py -p /dev/ttyUSB* monitor\r\n"
     ESP_LOGN "  cmm : idf.py monitor on all device"
     ESP_LOGN "  cmm [x]: idf.py monitor by index 'x', such as 'cmm 0' means: \$IDF_PATH/tools/idf.py -p /dev/ttyUSB0 monitor"
     exit

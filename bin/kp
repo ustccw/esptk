@@ -8,7 +8,7 @@ source $TK_PATH/bin/esptk-export
 
 # help
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\n  kp: kill a process running on particular port\n"
+    ESP_LOGB "NAME\r\n  kp: kill a process running on particular port\r\n"
     ESP_LOGN "  kp <port>: kill the <port> related process"
     exit
 fi

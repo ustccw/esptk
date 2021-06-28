@@ -13,7 +13,7 @@ fi
 
 # help
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\n  frebase <n> [<-p>]:  git rebase n commits into one by force, push to remote optional"
+    ESP_LOGB "NAME\r\n  frebase <n> [<-p>]:  git rebase n commits into one by force, push to remote optional"
     ESP_LOGN "  Example A: combine latest 3 commits into one, and use the fist commit message, NOT push to the remote"
     ESP_LOGB "    frebase 3"
     ESP_LOGN "  Example B: combine latest 5 commits into one, and use the fist commit message, push to the remote"
@@ -34,7 +34,7 @@ git reset --soft HEAD~$1 || ESP_LOGE "failed to git reset --soft"
 git commit -m "$git_msg" || ESP_LOGE "Commit Fail"
 
 log=`git log -1 --name-only`
-ESP_LOGI "After force rebase, New Commit Changes is:\n$log"
+ESP_LOGI "After force rebase, New Commit Changes is:\r\n$log"
 
 # git push
 if [ $# -eq 2 ]; then

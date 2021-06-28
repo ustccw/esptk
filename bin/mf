@@ -57,7 +57,7 @@ function esp_make_one_flash()
 }
 
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\n  mf: make flash ESPPORT=/dev/ttyUSB*\n"
+    ESP_LOGB "NAME\r\n  mf: make flash ESPPORT=/dev/ttyUSB*\r\n"
     ESP_LOGN "  mf : make and flash to all device"
     ESP_LOGN "  mf [x]: make and flash to one device by index 'x', such as 'mf 1' means: make flash by /dev/ttyUSB1"
     exit

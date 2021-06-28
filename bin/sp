@@ -8,7 +8,7 @@ source $TK_PATH/bin/esptk-export
 
 # help
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\n  sp: see the process running on particular port\n"
+    ESP_LOGB "NAME\r\n  sp: see the process running on particular port\r\n"
     ESP_LOGN "  sp <port>: see the <port> related process"
     exit
 fi
@@ -21,5 +21,5 @@ if test -z "$(lsof -i:$1)"; then
     ESP_LOGW "No a process running on port=$1"
 else
     log=`lsof -i:$1`
-    ESP_LOGI "Found port=$1 process..\n$log"
+    ESP_LOGI "Found port=$1 process..\r\n$log"
 fi

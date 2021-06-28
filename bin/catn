@@ -7,10 +7,10 @@ TK_PATH=`echo ${TK_PATH%/bin*}`
 source $TK_PATH/bin/esptk-export
 
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME:\n  catn: catn <n>"
+    ESP_LOGB "NAME:\r\n  catn: catn <n>"
     ESP_LOGB "  print nth file content"
 
-    ESP_LOGN "\n  weird filename is always allowed on linux, such as include space, or characters characters,"
+    ESP_LOGN "\r\n  weird filename is always allowed on linux, such as include space, or characters characters,"
     ESP_LOGN "  we can look up its content by 'catn <n>'"
     exit
 fi

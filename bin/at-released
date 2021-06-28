@@ -14,7 +14,7 @@ declare -A module_list
 
 # help
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\n  at-released: Download the released firmware of esp-at project from AT Binary Lists\n"
+    ESP_LOGB "NAME\r\n  at-released: Download the released firmware of esp-at project from AT Binary Lists\r\n"
     ESP_LOGN "  at-released: just download the firmware"
     ESP_LOGN "  at-released [x]: download the firmware and write flash by /dev/ttyUSBx"
     exit

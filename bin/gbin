@@ -10,7 +10,7 @@ outfile=`echo blank-$1bytes.bin`
 random=0
 
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME:\n  gbin: gbin <decimal size> [<decimal number>]\n"
+    ESP_LOGB "NAME:\r\n  gbin: gbin <decimal size> [<decimal number>]\r\n"
     ESP_LOGN "  <decimal number>: in [0, 255] or symbol 'R'"
     ESP_LOGN "  - default value is 255, means 0xFF in hexadecimal"
     ESP_LOGN "  - symbol 'R' means random number"
@@ -18,13 +18,13 @@ if [ "$1" = "-h" ]; then
     ESP_LOGN "  Example A: generate a 4KB size file, all of the file content is 0xFF, by default way"
     ESP_LOGB "    gbin 4096"
 
-    ESP_LOGN "\n  Example B: generate a 32 bytes size file, all of the file content is 0xAA"
+    ESP_LOGN "\r\n  Example B: generate a 32 bytes size file, all of the file content is 0xAA"
     ESP_LOGB "    gbin 32 170"
 
-    ESP_LOGN "\n  Example C: generate a 1MB size file, all of the file content is 0x0"
+    ESP_LOGN "\r\n  Example C: generate a 1MB size file, all of the file content is 0x0"
     ESP_LOGB "    gbin 1048576 0"
 
-    ESP_LOGN "\n  Example D: generate a 2KB size file, all of the file content filled with random number"
+    ESP_LOGN "\r\n  Example D: generate a 2KB size file, all of the file content filled with random number"
     ESP_LOGB "    gbin 2048 R"
     exit
 fi

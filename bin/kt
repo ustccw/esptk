@@ -8,7 +8,7 @@ source $TK_PATH/bin/esptk-export
 
 # help
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\n  kt: kill the task/process include particular keyword\n"
+    ESP_LOGB "NAME\r\n  kt: kill the task/process include particular keyword\r\n"
     ESP_LOGN "  kt <keyword>: kill the <keyword> related task/process"
     exit
 fi

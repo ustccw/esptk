@@ -8,16 +8,16 @@ source $TK_PATH/bin/esptk-export
 
 #help
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\n  hexdump2bin <hex stream or file>: convert the hexdump stream or text file into binary file"
-    ESP_LOGN "  Support to filter special character(s), (space splited, Abbreviation in ASCII): \"CR LF 0x \x \ \" BS ,\"\n"
+    ESP_LOGB "NAME\r\n  hexdump2bin <hex stream or file>: convert the hexdump stream or text file into binary file"
+    ESP_LOGN "  Support to filter special character(s), (space splited, Abbreviation in ASCII): \"CR LF 0x \x \ \" BS ,\"\r\n"
 
     ESP_LOGN "  Example A: convert the tcp payload file into the binary file"
     ESP_LOGB "  hexdump2bin tcp-payload.txt"
 
-    ESP_LOGN "\n  Example B: convert the hex stream into the binary file"
+    ESP_LOGN "\r\n  Example B: convert the hex stream into the binary file"
     ESP_LOGB "  hexdump2bin \"0x55,0xAA,0x55,0xAA\""
 
-    ESP_LOGN "\n  In Wireshark, the Hex Stream can be captured:"
+    ESP_LOGN "\r\n  In Wireshark, the Hex Stream can be captured:"
     ESP_LOGN "  Move to TCP payload -> Right Click -> Choose Copy -> Copy as a Hex Stream or Copy as Escaped String"
     exit
 fi
@@ -45,10 +45,10 @@ rm -rf $tbin
 !
 if [ -f "$1" ]; then
     ESP_LOGI "Trim File: $1.."
-    cat $1 | tr -d '\r' | tr -d '\n' | sed 's/0x//g' | sed 's/\\x//g' | sed 's/\\//g' | sed 's/\"//g' | sed 's/ //g' | sed 's/,//g' > $tbin
+    cat $1 | tr -d '\r' | tr -d '\r\n' | sed 's/0x//g' | sed 's/\\x//g' | sed 's/\\//g' | sed 's/\"//g' | sed 's/ //g' | sed 's/,//g' > $tbin
 else
     ESP_LOGI "Trim Hex Stream.."
-    echo $1 | tr -d '\r' | tr -d '\n' | sed 's/0x//g' | sed 's/\\x//g' | sed 's/\\//g' | sed 's/\"//g' | sed 's/ //g' | sed 's/,//g' > $tbin
+    echo $1 | tr -d '\r' | tr -d '\r\n' | sed 's/0x//g' | sed 's/\\x//g' | sed 's/\\//g' | sed 's/\"//g' | sed 's/ //g' | sed 's/,//g' > $tbin
 fi
 
 # generate the output hex file

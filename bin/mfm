@@ -58,7 +58,7 @@ function esp_make_one_flash()
 }
 
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\n  mfm: make flash monitor ESPPORT=/dev/ttyUSB*\n"
+    ESP_LOGB "NAME\r\n  mfm: make flash monitor ESPPORT=/dev/ttyUSB*\r\n"
     ESP_LOGN "  mfm : make flash monitor all device"
     ESP_LOGN "  mfm [x]: make flash monitor one device by index 'x', such as 'mfm 1' means: make flash monitor ESPPORT=/dev/ttyUSB1"
     exit

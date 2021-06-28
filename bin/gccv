@@ -8,7 +8,7 @@ source $TK_PATH/bin/esptk-export
 
 # help
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\n  gccv:  see the compiler version of toolchain\n"
+    ESP_LOGB "NAME\r\n  gccv:  see the compiler version of toolchain\r\n"
     ESP_LOGN "  include gcc, xtensa-lx106-elf-gcc, xtensa-esp32-elf-gcc, xtensa-esp32s2-elf-gcc, xtensa-esp32s3-elf-gcc, riscv32-esp-elf-gcc"
     exit
 fi

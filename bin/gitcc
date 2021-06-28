@@ -8,7 +8,7 @@ source $TK_PATH/bin/esptk-export
 
 # help
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\n  gitcc:  restore local git repository to the purest environment, without any change"
+    ESP_LOGB "NAME\r\n  gitcc:  restore local git repository to the purest environment, without any change"
     exit
 fi
 

@@ -16,7 +16,7 @@ export try_counts=1
 export log_file="cmfm_failed.log"
 
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\n  cmfm: \$IDF_PATH/tools/idf.py -p /dev/ttyUSB* flash monitor\n"
+    ESP_LOGB "NAME\r\n  cmfm: \$IDF_PATH/tools/idf.py -p /dev/ttyUSB* flash monitor\r\n"
     ESP_LOGN "  cmfm : idf.py flash monitor all device"
     ESP_LOGN "  cmfm [x]: idf.py flash monitor one device by index 'x', such as 'cmfm 1' means: \$IDF_PATH/tools/idf.py -p /dev/ttyUSB1 flash monitor"
     exit

@@ -14,7 +14,7 @@ fi
 
 # help
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\n  fpush:  git push <target branch> to remote repository by force"
+    ESP_LOGB "NAME\r\n  fpush:  git push <target branch> to remote repository by force"
     ESP_LOGN "  'fpush .': git push current branch to remote repository by force"
     ESP_LOGN "  'fpush <target branch>': git push target branch to remote repository by force"
     exit
