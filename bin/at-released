@@ -59,6 +59,10 @@ module_list["15"]="ESP32-WROVER-32 (v2.0.0.0)  |    ESP32/ESP32_WROVER/ESP32-WRO
 module_list["16"]="ESP32-PICO (v2.0.0.0)       |    ESP32/ESP32_PICO_D4/ESP32-PICO-D4_AT_Bin_V2.0.zip"
 module_list["17"]="ESP32-SOLO (v2.0.0.0)       |    ESP32/ESP32_SOLO/ESP32-SOLO_AT_Bin_V2.0.zip"
 
+module_list["18"]="ESP32-WROVER-32 (v2.2.0.0)  |    ESP32/ESP32_WROVER/ESP32-WROVER_AT_Bin_V2.2.0.0.zip"
+module_list["19"]="ESP32-PICO (v2.2.0.0)       |    ESP32/ESP32_PICO_D4/ESP32-PICO-D4_AT_Bin_V2.2.0.0.zip"
+module_list["20"]="ESP32-SOLO (v2.2.0.0)       |    ESP32/ESP32_SOLO/ESP32-SOLO_AT_Bin_V2.2.0.0.zip"
+
 module_counts=${#module_list[*]}
 
 # prompt
