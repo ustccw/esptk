@@ -6,7 +6,7 @@ TK_PATH=`realpath $0`
 TK_PATH=`echo ${TK_PATH%/bin*}`
 source $TK_PATH/bin/esptk-export
 
-esptk_version=1.1-dev
+esptk_version=1.2-dev
 
 cd $TK_PATH
 esptk_git=`git describe --tags --dirty`
@@ -15,9 +15,9 @@ cd - > /dev/null
 ESP_LOGN "esptk version: $esptk_version"
 ESP_LOGN "esptk git: $esptk_git"
 
-function SHOW_V1.0()
+function SHOW_FEATURES()
 {
-    ESP_LOGI "------------------------------ esptk v1.0 -----------------------------"
+    ESP_LOGI "------------------------------ esptk v1.1 -----------------------------"
 
     ESP_LOGN "m: make"
     ESP_LOGN "cm: idf.py build"
@@ -50,22 +50,27 @@ function SHOW_V1.0()
     ESP_LOGN "esp32s2: idf.py set-target esp32s2"
     ESP_LOGN "hexdump2bin: convert the hexdump stream or txt file into binary file"
     ESP_LOGN "esp-combine-bin.py: combine multi bins into one"
+    ESP_LOGN "fpull: git pull by force"
+    ESP_LOGN "fpush: git push by force"
+    ESP_LOGN "frebase: git (rebase & push) by force"
+    ESP_LOGN "fsubmit: git (add & commit & rebase & push) by force"
+    ESP_LOGN "aircap: capture the air packets"
+    ESP_LOGN "at-download: download the latest esp-at firmware"
+    ESP_LOGN "at-released: download the released esp-at firmware"
+    ESP_LOGN "check-doc-chars.py: check document characters"
+    ESP_LOGN "esp32c3: idf.py set-target esp32c3"
     ESP_LOGI "-----------------------------------------------------------------------"
 }
 
 function SHOW_ONGOING()
 {
     ESP_LOGI "------------------------- ongoing items -------------------------------"
-    ESP_LOGN "fpull: git pull by force"
-    ESP_LOGN "fpush: git push by force"
-    ESP_LOGN "frebase: git (rebase & push) by force"
-    ESP_LOGN "fsubmit: git (add & commit & rebase & push) by force"
     ESP_LOGI "-----------------------------------------------------------------------"
 }
 
 function SHOW_PLAN()
 {
-    ESP_LOGI "----------------- Next Release Date: 2021.06.30 -----------------------"
+    ESP_LOGI "-----------------------------------------------------------------------"
 }
 
 function SHOW_CHANGELOG()
@@ -75,7 +80,7 @@ function SHOW_CHANGELOG()
     ESP_LOGN "*******************************************************************************"
     ESP_LOGB "CHANGE LOG:"
     
-    SHOW_V1.0
+    SHOW_FEATURES
 
     SHOW_ONGOING
 
