@@ -58,9 +58,9 @@ fi
 
 # user configuration
 declare -A module_list
-module_list["0"]="esp8266-wroom02-at"
+module_list["0"]="esp32c3-mini-1-at"
 module_list["1"]="esp32-wroom-at"
-module_list["2"]="esp32s2-wroom-at"
+module_list["2"]="esp8266-wroom02-at"
 module_list["3"]="esp32-d2wd-at"
 module_list["4"]="esp32-mini-1-at"
 module_list["5"]="esp32-pico-d4-at"
@@ -72,6 +72,8 @@ module_list["10"]="esp32s2-wrover-at"
 module_list["11"]="esp8266-wroom-5V2L-at"
 module_list["12"]="esp8266-wroom02-n-at"
 module_list["13"]="esp8285-1MB-at"
+module_list["14"]="esp32c3-qcloud"
+module_list["15"]="esp32s2-wroom-at"
 
 for key in ${!module_list[@]}
 do {
@@ -79,7 +81,7 @@ do {
 }
 done
 
-echo -n  "Select the latest firmware you would like to download by index (0-13, default 0): "
+echo -n  "Select the latest firmware you would like to download by index (0-15, default 0): "
 read input
 if [ -z $input ]; then
     input=0
