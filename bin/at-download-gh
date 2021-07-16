@@ -19,15 +19,15 @@ artifact_url=https://api.github.com/repos/espressif/esp-at/actions/artifacts
 
 # help
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\r\n  at-download: Download the latest artifacts of esp-at project from GitHub Actions\r\n"
-    ESP_LOGN "  at-download: just download the firmware"
-    ESP_LOGN "  at-download [x]: download the firmware and write flash by /dev/ttyUSBx\r\n"
+    ESP_LOGB "NAME\r\n  at-download-gh: Download the latest artifacts of esp-at project from GitHub Actions\r\n"
+    ESP_LOGN "  at-download-gh: just download the firmware"
+    ESP_LOGN "  at-download-gh [x]: download the firmware and write flash by /dev/ttyUSBx\r\n"
 
     ESP_LOGB "  Prerequisite 1:"
     ESP_LOGN "  Visit https://github.com/settings/tokens and generate a personal access token to use with script."
     ESP_LOGN "  Choose \"repo\" and \"workflow\" as the scopes. Copy this token, don't lose it or you'll need to generate a new one."
     ESP_LOGN "  Create a config file in your home directory. The default is $github_token_file on Linux."
-    ESP_LOGN "  Paste the token to $github_token_file and save (token should be composed of 40 characters, including only 0-9 and A-Z)."
+    ESP_LOGN "  Paste the token to $github_token_file and save (token should be composed of 40 characters, including only 0-9 and A-Z).\r\n"
 
     ESP_LOGB "  Prerequisite 2:"
     ESP_LOGN "  Install the json parser by 'sudo apt install jq'"
@@ -39,7 +39,7 @@ if [ -e $github_token_file ]; then
     oauth_token=`cat ~/.github_oauth_token`
     ESP_LOGI "Token is $oauth_token"
 else
-    ESP_LOGE "No GitHub OAuth token found! More see as 'at-download -h'"
+    ESP_LOGE "No GitHub OAuth token found! More see as 'at-download-gh -h'"
 fi
 
 # download check

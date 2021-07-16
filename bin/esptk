@@ -55,7 +55,7 @@ function SHOW_FEATURES()
     ESP_LOGN "frebase: git (rebase & push) by force"
     ESP_LOGN "fsubmit: git (add & commit & rebase & push) by force"
     ESP_LOGN "aircap: capture the air packets"
-    ESP_LOGN "at-download: download the latest esp-at firmware"
+    ESP_LOGN "at-download-gh: download the latest esp-at firmware"
     ESP_LOGN "at-released: download the released esp-at firmware"
     ESP_LOGN "check-doc-chars.py: check document characters"
     ESP_LOGN "esp32c3: idf.py set-target esp32c3"
