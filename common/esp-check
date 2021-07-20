@@ -37,3 +37,11 @@ function MEXIT()
     ESP_LOGE "$1, exit!!!"
     exit
 }
+
+function ESP_NUM_CHECK()
+{
+    re='^[0-9]+$'
+    if ! [[ $1 =~ $re ]] ; then
+        ESP_LOGE "ASSERT: \"$1\" is NOT a number!"
+    fi
+}
