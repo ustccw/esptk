@@ -1,0 +1,113 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/esptk-export
+
+# variables
+flash_baud_rate=921600
+
+s_download_usb=0
+s_zip_dir_pre=`realpath .`
+s_zip_dir_alt=~/Downloads
+s_firmware_path=""
+s_dst_zip=""
+s_dst_type="*.zip"
+
+# help
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "NAME\r\n  at-download-local: unzip the compressed artifacts ($s_dst_type) and flash to the chip.\r\n"
+    ESP_LOGN "  at-download-local: download by /dev/ttyUSB0. Preferred firmware path: $s_zip_dir_pre (current directory), alternative firmware path: $s_zip_dir_alt"
+    ESP_LOGN "  at-download-local <x>: download by /dev/ttyUSB<x>. Preferred firmware path: $s_zip_dir_pre (current directory), alternative firmware path: $s_zip_dir_alt"
+    ESP_LOGN "  at-download-local <x> <firmware path>: download by /dev/ttyUSB<x>. Firmware path: specified <firmware path>, can be directory or file\r\n"
+    exit
+fi
+
+# parameters check
+if [ $# -eq 0 ]; then
+    s_download_usb=0
+elif [ $# -eq 1 ]; then
+    s_download_usb=$1
+elif [ $# -eq 2 ]; then
+    s_download_usb=$1
+    s_zip_dir_pre=`realpath $2`
+elif [ $# -gt 2 ]; then
+    ESP_LOGE "unsupported parameter counts: $#"
+fi
+
+if [ ! -e "/dev/ttyUSB$s_download_usb" ]; then
+    ESP_LOGW "No /dev/ttyUSB$s_download_usb"
+    exit
+fi
+
+function at_get_artifact_zip_path()
+{
+    s_firmware_path=$1
+    if [ ! -d $s_firmware_path ]; then
+        return
+    fi
+
+    zip_cnt=`find $s_firmware_path -name "$s_dst_type" | wc -l`
+    if [ $zip_cnt -eq 0 ]; then
+        s_dst_zip=""
+        ESP_LOGW "No $s_dst_type in directory: $s_firmware_path"
+    elif [ $zip_cnt -eq 1 ]; then
+        s_dst_zip=`find $s_firmware_path -name "$s_dst_type"`
+        s_dst_zip=`realpath $s_dst_zip`
+    else
+        idx=1
+        for onezip in $s_firmware_path/$s_dst_type; do {
+            ESP_LOGI "$idx: ${onezip}"
+            let "idx+=1"
+        }
+        done
+        echo -n "Here are multiple $s_dst_type (as listed above) in $s_firmware_path, please choose one of them to use by index (1-$zip_cnt, default 1): "
+        read input
+        if [ -z $input ]; then
+            input=1
+        elif [ $input -gt $zip_cnt -o $input -lt 1 ]; then
+            ESP_LOGE "Please input valid index. Range: [1,$zip_cnt]"
+        fi
+
+        idx=1
+        for onezip in $s_firmware_path/$s_dst_type; do {
+            if [ $idx -eq $input ]; then
+                s_dst_zip=$onezip
+                break
+            fi
+            let "idx+=1"
+        }
+        done
+    fi
+}
+
+# find artifact *.zip in preferred directory
+ESP_LOGI "Find artifact $s_dst_type in preferred directory: $s_zip_dir_pre.."
+at_get_artifact_zip_path $s_zip_dir_pre
+
+# find artifact *.zip in alternative directory
+if [ -z "$s_dst_zip" ]; then
+    ESP_LOGI "Find artifact $s_dst_type in alternative directory: $s_zip_dir_alt.."
+    at_get_artifact_zip_path $s_zip_dir_alt
+fi
+
+if [ -z "$s_dst_zip" ]; then
+    ESP_LOGE "No any $s_dst_type found in $s_zip_dir_pre and $s_zip_dir_alt"
+else
+    ESP_LOGI "Download by /dev/ttyUSB$s_download_usb and Firmware path: $s_dst_zip"
+fi
+
+# unzip
+dst_dir=esp-at-artifacts
+rm -rf $dst_dir
+unzip "$s_dst_zip" -d $dst_dir || ESP_LOGE "Unzip $s_dst_zip Failed"
+abs_dst_path=`realpath $dst_dir/build/factory/*.bin`
+ESP_LOGIB "Last ESP-AT Firmware Path ----> $abs_dst_path"
+
+# flash to chip
+ESP_LOGI "Ready to flash firmware to chip by /dev/ttyUSB$s_download_usb.."
+ESP_LOGI "esptool.py --port /dev/ttyUSB$s_download_usb --baud $flash_baud_rate write_flash 0x0 $abs_dst_path.."
+esptool.py --port /dev/ttyUSB$s_download_usb --baud $flash_baud_rate write_flash 0x0 $abs_dst_path || ESP_LOGE "Flash Firmware Failed"
+ESP_LOGIB "ESP-AT Firmware successfully flashed to chip!"
