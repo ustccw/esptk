@@ -1,0 +1,219 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/esptk-export
+
+# variables
+s_fw_burning_flag=1     # 1: will burn, 0: will not burn
+flash_baud_rate=921600  # burn baud rate
+
+# token to visit gitlab APIs
+oauth_token=""
+gitlab_token_file=~/.gitlab_oauth_token
+
+# 0: download firmware by job
+# 1: download firmware by pipeline
+# 2: download latest firmware
+# 3: download firmware by pipeline or job
+s_fw_download_flag=2
+
+# record url parameter to be downloaded, and update and convert it in middle steps
+s_input_url=""
+# last job id, used to download artifact
+s_job_id=
+# realpath of the artifact file (*.zip)
+s_artifact_path=""
+
+# some info of esp-at project
+at_project_id=234       # 234 is the project id of esp-at repository
+gitlab_api_url_prefix=https://gitlab.espressif.cn:6688/api/v4/projects
+gitlab_at_job_url_prefix=https://gitlab.espressif.cn:6688/application/esp-at/-/jobs
+
+# help
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "NAME\r\n  at-download-gl: Download the ESP-AT Firmware of esp-at project from GitLab and flash to chip.\r\n"
+    ESP_LOGN "  at-download-gl: download latest esp-at firmware and flash to chip by /dev/ttyUSB0"
+    ESP_LOGN "  at-download-gl <smart>: <smart> can be a number or an url"
+    ESP_LOGN "                 <smart> is a number: download latest esp-at firmware and flash to chip by /dev/ttyUSB<smart>"
+    ESP_LOGN "                 <smart> is an url: download esp-at firmware from url, and flash to chip by /dev/ttyUSB0"
+    ESP_LOGN "  at-download-gl <usb> <url>: download esp-at firmware from <url>, and flash to chip by /dev/ttyUSB<usb>\r\n"
+
+    ESP_LOGB "  Prerequisite 1:"
+    ESP_LOGN "  Visit https://gitlab.espressif.cn:6688/-/profile/personal_access_tokens and generate a personal access token to use with script."
+    ESP_LOGN "  Choose \"api\", \"read_user\", and \"read_api\" as the scopes. Copy this access token, don't lose it or you'll need to generate a new one."
+    ESP_LOGN "  Create a config file in your home directory. The default is $gitlab_token_file on Linux."
+    ESP_LOGN "  Paste the token to $gitlab_token_file and save (token should be composed of 20 characters and all characters are visible charset which in ASCII table).\r\n"
+
+    ESP_LOGB "  Prerequisite 2:"
+    ESP_LOGN "  Install the curl by 'sudo apt install curl'\r\n"
+
+    ESP_LOGB "  Prerequisite 3:"
+    ESP_LOGN "  Install the json parser by 'sudo apt install jq'"
+    exit
+fi
+
+# token check
+if [ -e $gitlab_token_file ]; then
+    oauth_token=`cat $gitlab_token_file`
+    ESP_LOGI "Token is $oauth_token"
+else
+    ESP_LOGE "No GitLab OAuth token found at $gitlab_token_file! More see as 'at-download-gl -h'"
+fi
+
+# parameters check
+if [ $# -eq 0 ]; then
+    s_download_usb=0
+    s_fw_download_flag=2
+elif [ $# -eq 1 ]; then
+    smart_len=`echo $1 | wc -c`
+    if [ $smart_len -gt 8 ]; then
+        s_download_usb=0
+        s_fw_download_flag=3
+        s_input_url="$1"
+    elif [ $smart_len -lt 4 ]; then
+        s_download_usb=$1
+        s_fw_download_flag=2
+    else
+        ESP_LOGE "unsupported first parameter length: \"$1\""
+    fi
+elif [ $# -eq 2 ]; then
+    s_download_usb=$1
+    s_input_url="$2"
+    s_fw_download_flag=3
+elif [ $# -gt 2 ]; then
+    ESP_LOGE "unsupported parameter counts: $#"
+fi
+
+# usb check
+if [ ! -e "/dev/ttyUSB$s_download_usb" ]; then
+    ESP_LOGW "No /dev/ttyUSB$s_download_usb found, Script Will NOT execute flash operation"
+    s_fw_burning_flag=0
+else
+    s_fw_burning_flag=1
+fi
+
+# pipelines & jobs url check
+if [ $s_fw_download_flag -eq 3 ]; then
+    if [[ "$s_input_url" == *"pipelines"* ]]; then
+        s_fw_download_flag=1
+    elif [[ "$s_input_url" == *"jobs"* ]]; then
+        s_fw_download_flag=0
+    else
+        ESP_LOGE "No any pipelines/jobs found at \"$s_input_url\""
+    fi
+fi
+
+# refer to https://docs.gitlab.com/ee/api/job_artifacts.html
+# A typic job url like: https://gitlab.espressif.cn:6688/application/esp-at/-/jobs/14643605
+function at_download_artifact_by_job_id()
+{
+    ESP_LOGI "Downloading esp-at job artifact from $1.."
+    s_job_id=`echo ${1##*jobs/}`
+    s_artifact_path=artifacts_$s_job_id.zip
+    rm -rf $s_artifact_path
+    curl --output $s_artifact_path --header "PRIVATE-TOKEN: $oauth_token" "$gitlab_api_url_prefix/$at_project_id/jobs/$s_job_id/artifacts" || ESP_LOGE "Curl GitLab Artifacts Failed"
+    s_artifact_path=`realpath $s_artifact_path`
+    ESP_LOGI "ESP-AT Firmware successfully Downloaded! ----> $s_artifact_path"
+}
+
+# refer to https://docs.gitlab.com/ee/api/jobs.html
+# A typic pipeline url like: https://gitlab.espressif.cn:6688/application/esp-at/-/pipelines/352799
+function at_download_artifact_by_pipeline()
+{
+    ESP_LOGI "Fetching esp-at jobs information from $1.."
+    pipeline_id=`echo ${1##*pipelines/}`
+    job_list=at_pipline_$pipeline_id
+    rm -rf $job_list
+
+    curl --output $job_list --header "PRIVATE-TOKEN: $oauth_token" "$gitlab_api_url_prefix/$at_project_id/pipelines/$pipeline_id/jobs" || ESP_LOGE "Curl GitLab Pipelines Failed"
+
+    node_cnt=`cat $job_list | jq ". | length"`
+    ESP_LOGIB "\r\nFound $node_cnt jobs at pipeline: $s_input_url\r\n"
+
+    ESP_LOGIB "-----------------------------------------------------------------------"
+    ESP_LOGIB "| idx |           job name            |  state  |  commits |  job id  |"
+    ESP_LOGIB "-----------------------------------------------------------------------"
+    for i in $(seq ${node_cnt})
+    do {
+        current_job_name=`cat $job_list | jq -r .[$i-1].name`
+        current_job_state=`cat $job_list | jq -r .[$i-1].status`
+        current_job_id=`cat $job_list | jq -r .[$i-1].id`
+        current_job_commit=`cat $job_list | jq -r .[$i-1].commit.short_id`
+        printf "| %3d | %-29s | %7s | %7s | %8s |\r\n" $i $current_job_name $current_job_state $current_job_commit $current_job_id
+    }
+    done
+    ESP_LOGIB "-----------------------------------------------------------------------\r\n"
+
+    # read index
+    echo -n  "Select the one of the above firmware you would like to download by index (1-$node_cnt, default 7): "
+    read input
+    if [ -z $input ]; then
+        input=7
+    fi
+    ESP_NUM_CHECK $input
+
+    if [ $input -gt $node_cnt -o $input -lt 1 ]; then
+        ESP_LOGE "Illegal index selected: $input"
+    fi
+
+    s_job_id=`cat $job_list | jq -r .[$input-1].id`
+    s_input_url=$gitlab_at_job_url_prefix/$s_job_id
+}
+
+# refer to https://docs.gitlab.com/ee/api/pipelines.html
+# https://gitlab.com/gitlab-org/gitlab-foss/-/issues/32466
+function at_download_artifact_by_default()
+{
+    ESP_LOGI "Fetching Latest esp-at pipeline information.."
+    job_list=at_latest_pipline
+    rm -rf $job_list
+    curl --output $job_list --header "PRIVATE-TOKEN: $oauth_token" "$gitlab_api_url_prefix/$at_project_id/pipelines?status=success&per_page=1&page=1" || ESP_LOGE "Curl GitLab Latest Pipeline Failed"
+
+    ESP_LOGI "Got Latest Pipeline, Information:"
+    pp_id=`cat $job_list | jq -r .[0].id`
+    pp_commit=`cat $job_list | jq -r .[0].sha`
+    pp_ref=`cat $job_list | jq -r .[0].ref`
+    pp_state=`cat $job_list | jq -r .[0].status`
+    pp_created_time=`cat $job_list | jq -r .[0].created_at`
+    pp_url=`cat $job_list | jq -r .[0].web_url`
+
+    ESP_LOGN "Pipeline ID: $pp_id\r\nPipeline CommitID: $pp_commit\r\nPipeline Ref: $pp_ref\r\nPipeline State: $pp_state\r\nPipeline Created Time: $pp_created_time\r\nPipeline URL: $pp_url"
+    s_input_url=$pp_url
+}
+
+# 0: download firmware by job
+# 1: download firmware by pipeline
+# 2: download latest firmware
+if [ $s_fw_download_flag -eq 2 ]; then
+    at_download_artifact_by_default
+    at_download_artifact_by_pipeline $s_input_url
+    at_download_artifact_by_job_id $s_input_url
+elif [ $s_fw_download_flag -eq 1 ]; then
+    at_download_artifact_by_pipeline $s_input_url
+    at_download_artifact_by_job_id $s_input_url
+elif [ $s_fw_download_flag -eq 0 ]; then
+    at_download_artifact_by_job_id $s_input_url
+else
+    ESP_LOGE "Exception with firmware download flag: $s_fw_download_flag"
+fi
+
+# unzip
+dst_dir=artifact_${s_job_id}
+rm -rf $dst_dir
+unzip $s_artifact_path -d $dst_dir || ESP_LOGE "Unzip $s_artifact_path Failed"
+abs_dst_path=`realpath $dst_dir/build/factory/*.bin`
+ESP_LOGIB "ESP-AT Firmware Path ----> $abs_dst_path"
+
+# flash to chip
+if [ $s_fw_burning_flag -eq 1 ]; then
+    ESP_LOGI "Ready to flash firmware to chip by /dev/ttyUSB$s_download_usb.."
+    ESP_LOGI "esptool.py --port /dev/ttyUSB$s_download_usb --baud $flash_baud_rate write_flash 0x0 $abs_dst_path.."
+    esptool.py --port /dev/ttyUSB$s_download_usb --baud $flash_baud_rate write_flash 0x0 $abs_dst_path || ESP_LOGE "Flash Firmware Failed"
+    ESP_LOGIB "ESP-AT Firmware successfully flashed to chip!"
+else
+    ESP_LOGN "All done! Please run:\r\n"
+    ESP_LOGN "  esptool.py --port [PORT] --baud $flash_baud_rate write_flash 0x0 $abs_dst_path\r\n"
+fi
