@@ -125,7 +125,7 @@ function at_download_artifact_by_pipeline()
 {
     ESP_LOGI "Fetching esp-at jobs information from $1.."
     pipeline_id=`echo ${1##*pipelines/}`
-    job_list=at_pipline_$pipeline_id
+    job_list=at_pipeline_$pipeline_id
     rm -rf $job_list
 
     curl --output $job_list --header "PRIVATE-TOKEN: $oauth_token" "$gitlab_api_url_prefix/$at_project_id/pipelines/$pipeline_id/jobs" || ESP_LOGE "Curl GitLab Pipelines Failed"
@@ -168,7 +168,7 @@ function at_download_artifact_by_pipeline()
 function at_download_artifact_by_default()
 {
     ESP_LOGI "Fetching Latest esp-at pipeline information.."
-    job_list=at_latest_pipline
+    job_list=at_latest_pipeline
     rm -rf $job_list
     curl --output $job_list --header "PRIVATE-TOKEN: $oauth_token" "$gitlab_api_url_prefix/$at_project_id/pipelines?status=success&per_page=1&page=1" || ESP_LOGE "Curl GitLab Latest Pipeline Failed"
 
