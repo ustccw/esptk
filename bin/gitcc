@@ -12,44 +12,43 @@ if [ "$1" = "-h" ]; then
     exit
 fi
 
-if [ $# -gt 1 ]; then
-    ESP_LOGE "unsupported parameter counts:$#, expected see 0 or 1"
-    exit
-fi
-
 function gitcc_traversal()
 {
+    f_dir=$(pwd)
     cd $1
-    ESP_LOGI "clean traveral in: $(pwd)"
+    ESP_LOGI "Cleaning $(pwd)..."
     git reset --hard
     git clean -xdff
     git submodule sync
-    git submodule update --init --recursive
+    git submodule update --init --recursive || true
 
     for item in `git status | grep "modified:" | awk '{print $2}'`
     do {
-        sub_directory=`realpath $item`
-        cd $sub_directory
-        gitcc_traversal $sub_directory
-        cd -
+        c_dir=`realpath $item`
+        gitcc_traversal $c_dir
     }
     done
-    cd -
+
+    git submodule update --init --recursive || true
+    ESP_LOGI "Clean $(pwd) Done."
+    cd $f_dir
 }
 
-root_path=$(pwd)
-ESP_LOGI "directory: $root_path"
-
 if [ $# -eq 0 ]; then
-    gitcc_traversal $(pwd)
+    cleanup_path=$(pwd)
 elif [ $# -eq 1 ]; then
-    gitcc_traversal `realpath $1`
+    cleanup_path=`realpath $1`
+else
+    ESP_LOGE "unsupported parameter counts: $#"
 fi
 
+ESP_LOGI "Ready to cleanup Root Directory: $cleanup_path.."
+gitcc_traversal $cleanup_path
+
 log=`git status`
-ESP_LOGI "$log"
+ESP_LOGI "\r\n$log"
 
 log=`git describe --tags --dirty`
 ESP_LOGI "$log"
 
-cd $root_path
+cd $cleanup_path
