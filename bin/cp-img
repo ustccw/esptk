@@ -1,0 +1,73 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/esptk-export
+
+# can set a special directory for your copy
+# the script will copy the image which is the last modified file in the special directory
+dst_dir=
+
+# help
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "NAME\r\n  cp-img:  copy image to clipboard\r\n"
+    ESP_LOGN "  cp-img: copy image to clipboard, image is the last modified file in the current directory."
+    ESP_LOGN "  cp-img <path>: copy image to clipboard, image is from <path>, can be directory or file.\r\n"
+
+    ESP_LOGB "  Prerequisite:"
+    ESP_LOGN "  Install the xclip by 'sudo apt install xclip'\r\n"
+    exit
+fi
+
+if [ $# -gt 1 ]; then
+    ESP_LOGE "unsupported parameter counts: $#"
+fi
+
+
+function cp_img_content()
+{
+    xclip -selection clipboard -t image/png -i "$1" || ESP_LOGE "Copy Image Error"
+}
+
+if [ $# -eq 1 ]; then
+    ESP_OBJ_CHECK $1
+    if [ -d "$1" ]; then
+        dst_dir="$1"
+    elif [ -f "$1" ]; then
+        dst_file="$1"
+        cp_img_content $dst_file
+        ESP_LOGI "Image Copied. ($dst_file)"
+        exit
+    else
+        ESP_LOGE "unsupported type: $1"
+    fi
+fi
+
+# No parameters
+if [ -z $dst_dir ]; then
+    dst_dir=`realpath .`
+fi
+
+# set by ustccw
+lcfg="$USER@$HOSTNAME.com"
+rcfg=`cat $0 | head -n 2 | tail -n 1 | awk '{print $2}'`
+if [ "$lcfg" == "$rcfg" ]; then
+    dst_dir=~/$USER/GShare
+fi
+
+# copy
+img_name=$(ls -t "$dst_dir" | head -n 1)
+if [ -d "$dst_dir/$img_name" ]; then
+    ESP_LOGE "($dst_dir/$img_name) is a directory, but not an image."
+else
+    tmp_img=img-tmp.png
+    rm -rf $tmp_img
+    ls -t "$dst_dir/$img_name" | head -n 1 | xargs -I {} cp {} ./$tmp_img
+    cp_img_content $tmp_img
+    rm -rf $tmp_img
+    ESP_LOGI "Image has Copied to Clipboard. ($dst_dir/$img_name)"
+fi
+
+exit
