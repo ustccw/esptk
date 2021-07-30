@@ -120,7 +120,7 @@ token_header="Authorization: token $oauth_token"
 wget --header="$preset_header" --header="$token_header" $archive_download_url -O $dst_zip || ESP_LOGE "WGet Firmware Packet Failed"
 
 unzip $dst_zip -d $dst_dir
-abs_dst_path=`realpath $dst_dir/factory/*.bin`
+abs_dst_path=`find $dst_dir -name "factory*.bin" | grep -v param | xargs realpath`
 ESP_LOGIB "Latest $dst_module_name firmware successfully downloaded! ----> $abs_dst_path"
 
 # flash to chip

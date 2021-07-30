@@ -103,7 +103,7 @@ fi
 dst_dir=esp-at-artifacts
 rm -rf $dst_dir
 unzip "$s_dst_zip" -d $dst_dir || ESP_LOGE "Unzip $s_dst_zip Failed"
-abs_dst_path=`realpath $dst_dir/build/factory/*.bin`
+abs_dst_path=`find $dst_dir -name "factory*.bin" | grep -v param | xargs realpath`
 ESP_LOGIB "Last ESP-AT Firmware Path ----> $abs_dst_path"
 
 # flash to chip
