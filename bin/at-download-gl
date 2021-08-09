@@ -114,9 +114,16 @@ function at_download_artifact_by_job_id()
     s_job_id=`echo ${1##*jobs/}`
     s_artifact_path=artifacts_$s_job_id.zip
     rm -rf $s_artifact_path
+    # Script should lookup the job status before download job artifact,
+    # But for simplicity, we ignore this step.
     curl --output $s_artifact_path --header "PRIVATE-TOKEN: $oauth_token" "$gitlab_api_url_prefix/$at_project_id/jobs/$s_job_id/artifacts" || ESP_LOGE "Curl GitLab Artifacts Failed"
     s_artifact_path=`realpath $s_artifact_path`
-    ESP_LOGI "ESP-AT Firmware successfully Downloaded! ----> $s_artifact_path"
+    if [ `cat $s_artifact_path | wc -c` -lt 50 ]; then
+        msg=`cat $s_artifact_path`
+        ESP_LOGE "ESP-AT Firmware Downloaded Failed:\r\n$msg"
+    else
+        ESP_LOGI "ESP-AT Firmware successfully Downloaded! ----> $s_artifact_path"
+    fi
 }
 
 # refer to https://docs.gitlab.com/ee/api/jobs.html
@@ -157,6 +164,13 @@ function at_download_artifact_by_pipeline()
 
     if [ $input -gt $node_cnt -o $input -lt 1 ]; then
         ESP_LOGE "Illegal index selected: $input"
+    fi
+
+    expected_job_state="success"
+    current_job_state=`cat $job_list | jq -r .[$input-1].status`
+    current_job_name=`cat $job_list | jq -r .[$input-1].name`
+    if [ "$current_job_state" != "$expected_job_state" ]; then
+        ESP_LOGE "Expect job state: <$expected_job_state>, but <$current_job_name> has the job state: <$current_job_state>"
     fi
 
     s_job_id=`cat $job_list | jq -r .[$input-1].id`
