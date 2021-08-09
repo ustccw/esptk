@@ -106,8 +106,17 @@ unzip "$s_dst_zip" -d $dst_dir || ESP_LOGE "Unzip $s_dst_zip Failed"
 abs_dst_path=`find $dst_dir -name "factory*.bin" | grep -v param | xargs realpath`
 ESP_LOGIB "Last ESP-AT Firmware Path ----> $abs_dst_path"
 
+# Specify burning parameters by target
+first_byte_of_esp8266="E9"
+first_byte=`cat $abs_dst_path | head -c 1 | hexdump -v -e '/1 "%02X\n"'`
+if [ "$first_byte" == "$first_byte_of_esp8266" ]; then
+    write_flash_params="--flash_size 2MB-c1"
+else
+    write_flash_params=""
+fi
+
 # flash to chip
 ESP_LOGI "Ready to flash firmware to chip by /dev/ttyUSB$s_download_usb.."
-ESP_LOGI "esptool.py --port /dev/ttyUSB$s_download_usb --baud $flash_baud_rate write_flash 0x0 $abs_dst_path.."
-esptool.py --port /dev/ttyUSB$s_download_usb --baud $flash_baud_rate write_flash 0x0 $abs_dst_path || ESP_LOGE "Flash Firmware Failed"
+ESP_LOGI "esptool.py --port /dev/ttyUSB$s_download_usb --baud $flash_baud_rate write_flash $write_flash_params 0x0 $abs_dst_path.."
+esptool.py --port /dev/ttyUSB$s_download_usb --baud $flash_baud_rate write_flash $write_flash_params 0x0 $abs_dst_path || ESP_LOGE "Flash Firmware Failed"
 ESP_LOGIB "ESP-AT Firmware successfully flashed to chip!"
