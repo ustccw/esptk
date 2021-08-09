@@ -51,6 +51,13 @@ module_list["6"]="ESP32-S2-WROOM (v2.1.0.0)    |    ESP32S2/ESP32-S2-WROOM/ESP32
 module_list["7"]="ESP32-WROOM-32 (v2.0.0.0)    |    ESP32/ESP32_WROOM/ESP32-WROOM-32_AT_Bin_V2.0.zip"
 module_list["8"]="ESP-WROOM-02 (v2.0.0.0)      |    ESP8266/ESP8266-IDF-AT_V2.0_0.zip"
 
+# nonos-at
+module_list["n1"]="ESP-WROOM-02 (v1.7.4.0)      |    ESP8266/NONOS-AT/NONOS-AT-V1.7.4.zip"
+module_list["n2"]="ESP-WROOM-02 (v1.7.3.0)      |    ESP8266/NONOS-AT/NONOS-AT-V1.7.3.zip"
+module_list["n3"]="ESP-WROOM-02 (v1.7.2.0)      |    ESP8266/NONOS-AT/NONOS-AT-V1.7.2.zip"
+module_list["n4"]="ESP-WROOM-02 (v1.7.1.0)      |    ESP8266/NONOS-AT/NONOS-AT-V1.7.1.zip"
+module_list["n5"]="ESP-WROOM-02 (v1.7.0.0)      |    ESP8266/NONOS-AT/NONOS-AT-V1.7.0.zip"
+
 # others
 module_list["9"]="ESP32-WROVER-32 (v2.1.0.0)   |    ESP32/ESP32_WROVER/ESP32-WROVER_AT_Bin_V2.1.0.0.zip"
 module_list["10"]="ESP32-PICO (v2.1.0.0)       |    ESP32/ESP32_PICO_D4/ESP32-PICO-D4_AT_Bin_V2.1.0.0.zip"
