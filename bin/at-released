@@ -74,7 +74,8 @@ module_list["19"]="ESP32-PICO (v2.2.0.0)       |    ESP32/ESP32_PICO_D4/ESP32-PI
 module_list["20"]="ESP32-SOLO (v2.2.0.0)       |    ESP32/ESP32_SOLO/ESP32-SOLO_AT_Bin_V2.2.0.0.zip"
 
 # prompt
-for key in ${!module_list[@]}; do
+sorted_index=`echo ${!module_list[@]} | xargs -n1 | sort -g | xargs`
+for key in $sorted_index; do
     value=${module_list[${key}]}
     ESP_LOGI "${key}: ${value%|*}"
 done
