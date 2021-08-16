@@ -9,6 +9,7 @@ source $TK_PATH/bin/esptk-export
 # variables
 s_download_flag=0
 flash_baud_rate=921600
+flash_write_params=""
 s_url_prefix="https://download.espressif.com/esp_at/firmware/"
 declare -A module_list
 
@@ -86,6 +87,10 @@ if [ -z $input ]; then
     input=1
 fi
 
+if [[ $input == *"n"* ]]; then
+    flash_write_params="--flash_size 2MB-c1"
+fi
+
 # calculate url by input
 dst_module_info=${module_list[${input}]}
 dst_module_name=${dst_module_info%|*}
@@ -115,9 +120,9 @@ ESP_LOGIB "Released firmware successfully downloaded! ----> $abs_dst_path"
 if [ $s_download_flag -eq 1 ]; then
     ESP_LOGI "Ready to flash firmware to chip by /dev/ttyUSB$1.."
     ESP_LOGI "esptool.py --port /dev/ttyUSB$1 --baud $flash_baud_rate write_flash 0x0 $abs_dst_path.."
-    esptool.py --port /dev/ttyUSB$1 --baud $flash_baud_rate write_flash 0x0 $abs_dst_path || ESP_LOGE "Flash Firmware Failed"
+    esptool.py --port /dev/ttyUSB$1 --baud $flash_baud_rate write_flash $flash_write_params 0x0 $abs_dst_path || ESP_LOGE "Flash Firmware Failed"
     ESP_LOGIB "Released firmware successfully flashed to chip!"
 else
     ESP_LOGN "All done! Please run:\r\n"
-    ESP_LOGN "  esptool.py --port [PORT] --baud $flash_baud_rate write_flash 0x0 $abs_dst_path\r\n"
+    ESP_LOGN "  esptool.py --port [PORT] --baud $flash_baud_rate write_flash $flash_write_params 0x0 $abs_dst_path\r\n"
 fi
