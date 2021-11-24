@@ -107,7 +107,7 @@ ESP_LOGI "Ready to Download Released Firmware from AT Binary Lists.."
 dst_zip=${s_firmware_url##*/}
 rm -rf $dst_zip
 echo "zip is $dst_zip"
-wget $s_firmware_url -O $dst_zip || ESP_LOGE "WGet Released Firmware Failed"
+wget $s_firmware_url --no-check-certificate -O $dst_zip || ESP_LOGE "WGet Released Firmware Failed"
 
 dst_dir=${dst_zip%.*}
 echo "dst dir is $dst_dir"
