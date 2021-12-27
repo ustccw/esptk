@@ -9,6 +9,7 @@ source $TK_PATH/bin/esptk-export
 # variables
 s_download_flag=0
 flash_baud_rate=921600
+is_nonos_at=0
 flash_write_params=""
 s_url_prefix="https://download.espressif.com/esp_at/firmware/"
 declare -A module_list
@@ -61,16 +62,16 @@ module_list["bs3"]="ESP32-SOLO (v2.0.0.0)       |    ESP32/ESP32_SOLO/ESP32-SOLO
 module_list["bm1"]="ESP32-MINI (v2.2.0.0)       |    ESP32/ESP32_MINI/ESP32-MINI-1_AT_Bin_V2.2.0.0.zip"
 
 # nonos-at
-module_list["n0"]="ESP-WROOM-02 (v1.7.5.0)      |    ESP8266/NONOS-AT/NONOS-AT-V1.7.5.zip"
-module_list["n1"]="ESP-WROOM-02 (v1.7.4.0)      |    ESP8266/NONOS-AT/NONOS-AT-V1.7.4.zip"
-module_list["n2"]="ESP-WROOM-02 (v1.7.3.0)      |    ESP8266/NONOS-AT/NONOS-AT-V1.7.3.zip"
-module_list["n3"]="ESP-WROOM-02 (v1.7.2.0)      |    ESP8266/NONOS-AT/NONOS-AT-V1.7.2.zip"
-module_list["n4"]="ESP-WROOM-02 (v1.7.1.0)      |    ESP8266/NONOS-AT/NONOS-AT-V1.7.1.zip"
-module_list["n5"]="ESP-WROOM-02 (v1.7.0.0)      |    ESP8266/NONOS-AT/NONOS-AT-V1.7.0.zip"
-module_list["n6"]="ESP-WROOM-02 (v1.6.2.0)      |    ESP8266/NONOS-AT/NONOS-AT-V1.6.2.zip"
-module_list["n7"]="ESP-WROOM-02 (v1.6.1.0)      |    ESP8266/NONOS-AT/NONOS-AT-V1.6.1.zip"
-module_list["n8"]="ESP-WROOM-02 (v1.6.0.0)      |    ESP8266/NONOS-AT/NONOS-AT-V1.6.0.zip"
-module_list["n9"]="ESP-WROOM-02 (v1.5.1.0)      |    ESP8266/NONOS-AT/NONOS-AT-V1.5.1.zip"
+module_list["n0"]="ESP-WROOM-02 (v1.7.5.0)      |    nonos/esp8266_at_bin_v1.7.5.zip"
+module_list["n1"]="ESP-WROOM-02 (v1.7.4.0)      |    nonos/esp8266_at_bin_v1.7.4.zip"
+module_list["n2"]="ESP-WROOM-02 (v1.7.3.0)      |    nonos/esp8266_at_bin_v1.7.3.zip"
+module_list["n3"]="ESP-WROOM-02 (v1.7.2.0)      |    nonos/esp8266_at_bin_v1.7.2.zip"
+module_list["n4"]="ESP-WROOM-02 (v1.7.1.0)      |    nonos/esp8266_at_bin_v1.7.1.zip"
+module_list["n5"]="ESP-WROOM-02 (v1.7.0.0)      |    nonos/esp8266_at_bin_v1.7.0.zip"
+module_list["n6"]="ESP-WROOM-02 (v1.6.2.0)      |    nonos/esp8266_at_bin_v1.6.2.zip"
+module_list["n7"]="ESP-WROOM-02 (v1.6.1.0)      |    nonos/esp8266_at_bin_v1.6.1.zip"
+module_list["n8"]="ESP-WROOM-02 (v1.6.0.0)      |    nonos/esp8266_at_bin_v1.6.0.zip"
+module_list["n9"]="ESP-WROOM-02 (v1.5.1.0)      |    nonos/esp8266_at_bin_v1.5.1.zip"
 
 # esp32s2-at
 module_list["s1"]="ESP32-S2-WROOM (v2.1.0.0)    |    ESP32S2/ESP32-S2-WROOM/ESP32-S2-WROOM_AT_Bin_V2.1.0.0.zip"
@@ -92,6 +93,7 @@ if [ -z $input ]; then
 fi
 
 if [[ $input == *"n"* ]]; then
+    is_nonos_at=1
     flash_write_params="--flash_size 2MB-c1"
 fi
 
@@ -117,7 +119,19 @@ echo "dst dir is $dst_dir"
 
 rm -rf $dst_dir
 unzip $dst_zip -d ${dst_dir}
-abs_dst_path=`find ${dst_dir} -name "*factory*.bin" | grep -v MACOS | grep -v param | xargs realpath`
+
+if [[ $input == *"n"* ]]; then
+    boot_bin=`find ${dst_dir} -name "boot_v1.7.bin" | xargs realpath`
+    user_bin=`find ${dst_dir} -name "user1.2048.new.5.bin" | grep -v at_sdio | xargs realpath`
+    phy_init_bin=`find ${dst_dir} -name "esp_init_data_default*.bin" | head -n 1 | xargs realpath`
+    rm -rf target.bin
+    ESP_LOGI "Combine bins.. (boot:0x0 $boot_bin, userbin: 0x1000 $user_bin, phy_init: 0x1fc000 $phy_init_bin)"
+    esp-combine-bin.py 0x0 $boot_bin 0x1000 $user_bin 0x1fc000 $phy_init_bin 2MB || ESP_LOGE "Failed to combine bins"
+    abs_dst_path=`find -name "target.bin" | xargs realpath`
+else
+    abs_dst_path=`find ${dst_dir} -name "*factory*.bin" | grep -v MACOS | grep -v param | xargs realpath`
+fi
+
 ESP_LOGIB "Released firmware successfully downloaded! ----> $abs_dst_path"
 
 # flash to chip
