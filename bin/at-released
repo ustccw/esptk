@@ -35,45 +35,48 @@ elif [ $# -gt 1 ]; then
     ESP_LOGE "unsupported parameter counts: $#"
 fi
 
-# v2.2.1.0
-module_list["0"]="ESP-WROOM-02 (v2.2.1.0)      |    ESP8266/ESP8266-IDF-AT_V2.2.1.0.zip"
+# esp8266-at
+module_list["a1"]="ESP-WROOM-02 (v2.2.1.0)      |    ESP8266/ESP8266-IDF-AT_V2.2.1.0.zip"
+module_list["a2"]="ESP-WROOM-02 (v2.2.0.0)      |    ESP8266/ESP8266-IDF-AT_V2.2.0.0.zip"
+module_list["a3"]="ESP-WROOM-02 (v2.1.0.0)      |    ESP8266/ESP8266-IDF-AT_V2.1.0.0.zip"
+module_list["a4"]="ESP-WROOM-02 (v2.0.0.0)      |    ESP8266/ESP8266-IDF-AT_V2.0_0.zip"
 
-# v2.2.0.0
-module_list["1"]="ESP32-WROOM-32 (v2.2.0.0)    |    ESP32/ESP32_WROOM/ESP32-WROOM-32_AT_Bin_V2.2.0.0.zip"
-module_list["2"]="ESP32-C3-MINI-1 (v2.2.0.0)   |    ESP32C3/ESP32-C3-MINI-1_AT_Bin_V2.2.0.0.zip"
-module_list["3"]="ESP-WROOM-02 (v2.2.0.0)      |    ESP8266/ESP8266-IDF-AT_V2.2.0.0.zip"
+# esp32c3-at
+module_list["c1"]="ESP32-C3-MINI-1 (v2.3.0.0)   |    ESP32C3/ESP32-C3-MINI-1_AT_Bin_V2.3.0.0.zip"
+module_list["c2"]="ESP32-C3-MINI-1 (v2.2.0.0)   |    ESP32C3/ESP32-C3-MINI-1_AT_Bin_V2.2.0.0.zip"
 
-# v2.1.0.0
-module_list["4"]="ESP32-WROOM-32 (v2.1.0.0)    |    ESP32/ESP32_WROOM/ESP32-WROOM-32_AT_Bin_V2.1.0.0.zip"
-module_list["5"]="ESP-WROOM-02 (v2.1.0.0)      |    ESP8266/ESP8266-IDF-AT_V2.1.0.0.zip"
-module_list["6"]="ESP32-S2-WROOM (v2.1.0.0)    |    ESP32S2/ESP32-S2-WROOM/ESP32-S2-WROOM_AT_Bin_V2.1.0.0.zip"
-
-# v2.0.0.0
-module_list["7"]="ESP32-WROOM-32 (v2.0.0.0)    |    ESP32/ESP32_WROOM/ESP32-WROOM-32_AT_Bin_V2.0.zip"
-module_list["8"]="ESP-WROOM-02 (v2.0.0.0)      |    ESP8266/ESP8266-IDF-AT_V2.0_0.zip"
+# esp32-at
+module_list["b1"]="ESP32-WROOM-32 (v2.2.0.0)    |    ESP32/ESP32_WROOM/ESP32-WROOM-32_AT_Bin_V2.2.0.0.zip"
+module_list["b2"]="ESP32-WROOM-32 (v2.1.0.0)    |    ESP32/ESP32_WROOM/ESP32-WROOM-32_AT_Bin_V2.1.0.0.zip"
+module_list["b3"]="ESP32-WROOM-32 (v2.0.0.0)    |    ESP32/ESP32_WROOM/ESP32-WROOM-32_AT_Bin_V2.0.zip"
+module_list["bw1"]="ESP32-WROVER-32 (v2.2.0.0)  |    ESP32/ESP32_WROVER/ESP32-WROVER_AT_Bin_V2.2.0.0.zip"
+module_list["bw2"]="ESP32-WROVER-32 (v2.1.0.0)  |    ESP32/ESP32_WROVER/ESP32-WROVER_AT_Bin_V2.1.0.0.zip"
+module_list["bw3"]="ESP32-WROVER-32 (v2.0.0.0)  |    ESP32/ESP32_WROVER/ESP32-WROVER_AT_Bin_V2.0.zip"
+module_list["bp1"]="ESP32-PICO (v2.2.0.0)       |    ESP32/ESP32_PICO_D4/ESP32-PICO-D4_AT_Bin_V2.2.0.0.zip"
+module_list["bp2"]="ESP32-PICO (v2.1.0.0)       |    ESP32/ESP32_PICO_D4/ESP32-PICO-D4_AT_Bin_V2.1.0.0.zip"
+module_list["bp3"]="ESP32-PICO (v2.0.0.0)       |    ESP32/ESP32_PICO_D4/ESP32-PICO-D4_AT_Bin_V2.0.zip"
+module_list["bs1"]="ESP32-SOLO (v2.2.0.0)       |    ESP32/ESP32_SOLO/ESP32-SOLO_AT_Bin_V2.2.0.0.zip"
+module_list["bs2"]="ESP32-SOLO (v2.1.0.0)       |    ESP32/ESP32_SOLO/ESP32-SOLO_AT_Bin_V2.1.0.0.zip"
+module_list["bs3"]="ESP32-SOLO (v2.0.0.0)       |    ESP32/ESP32_SOLO/ESP32-SOLO_AT_Bin_V2.0.zip"
+module_list["bm1"]="ESP32-MINI (v2.2.0.0)       |    ESP32/ESP32_MINI/ESP32-MINI-1_AT_Bin_V2.2.0.0.zip"
 
 # nonos-at
+module_list["n0"]="ESP-WROOM-02 (v1.7.5.0)      |    ESP8266/NONOS-AT/NONOS-AT-V1.7.5.zip"
 module_list["n1"]="ESP-WROOM-02 (v1.7.4.0)      |    ESP8266/NONOS-AT/NONOS-AT-V1.7.4.zip"
 module_list["n2"]="ESP-WROOM-02 (v1.7.3.0)      |    ESP8266/NONOS-AT/NONOS-AT-V1.7.3.zip"
 module_list["n3"]="ESP-WROOM-02 (v1.7.2.0)      |    ESP8266/NONOS-AT/NONOS-AT-V1.7.2.zip"
 module_list["n4"]="ESP-WROOM-02 (v1.7.1.0)      |    ESP8266/NONOS-AT/NONOS-AT-V1.7.1.zip"
 module_list["n5"]="ESP-WROOM-02 (v1.7.0.0)      |    ESP8266/NONOS-AT/NONOS-AT-V1.7.0.zip"
+module_list["n6"]="ESP-WROOM-02 (v1.6.2.0)      |    ESP8266/NONOS-AT/NONOS-AT-V1.6.2.zip"
+module_list["n7"]="ESP-WROOM-02 (v1.6.1.0)      |    ESP8266/NONOS-AT/NONOS-AT-V1.6.1.zip"
+module_list["n8"]="ESP-WROOM-02 (v1.6.0.0)      |    ESP8266/NONOS-AT/NONOS-AT-V1.6.0.zip"
+module_list["n9"]="ESP-WROOM-02 (v1.5.1.0)      |    ESP8266/NONOS-AT/NONOS-AT-V1.5.1.zip"
 
-# others
-module_list["9"]="ESP32-WROVER-32 (v2.1.0.0)   |    ESP32/ESP32_WROVER/ESP32-WROVER_AT_Bin_V2.1.0.0.zip"
-module_list["10"]="ESP32-PICO (v2.1.0.0)       |    ESP32/ESP32_PICO_D4/ESP32-PICO-D4_AT_Bin_V2.1.0.0.zip"
-module_list["11"]="ESP32-SOLO (v2.1.0.0)       |    ESP32/ESP32_SOLO/ESP32-SOLO_AT_Bin_V2.1.0.0.zip"
-module_list["12"]="ESP32-S2-WROVER (v2.1.0.0)  |    ESP32S2/ESP32-S2-WROVER/ESP32-S2-WROVER_AT_Bin_V2.1.0.0.zip"
-module_list["13"]="ESP32-S2-SOLO (v2.1.0.0)    |    ESP32S2/ESP32-S2-SOLO/ESP32-S2-SOLO_AT_Bin_V2.1.0.0.zip"
-module_list["14"]="ESP32-S2-MINI (v2.1.0.0)    |    ESP32S2/ESP32-S2-MINI/ESP32-S2-MINI_AT_Bin_V2.1.0.0.zip"
-module_list["15"]="ESP32-WROVER-32 (v2.0.0.0)  |    ESP32/ESP32_WROVER/ESP32-WROVER_AT_Bin_V2.0.zip"
-module_list["16"]="ESP32-PICO (v2.0.0.0)       |    ESP32/ESP32_PICO_D4/ESP32-PICO-D4_AT_Bin_V2.0.zip"
-module_list["17"]="ESP32-SOLO (v2.0.0.0)       |    ESP32/ESP32_SOLO/ESP32-SOLO_AT_Bin_V2.0.zip"
-
-module_list["18"]="ESP32-WROVER-32 (v2.2.0.0)  |    ESP32/ESP32_WROVER/ESP32-WROVER_AT_Bin_V2.2.0.0.zip"
-module_list["19"]="ESP32-PICO (v2.2.0.0)       |    ESP32/ESP32_PICO_D4/ESP32-PICO-D4_AT_Bin_V2.2.0.0.zip"
-module_list["20"]="ESP32-SOLO (v2.2.0.0)       |    ESP32/ESP32_SOLO/ESP32-SOLO_AT_Bin_V2.2.0.0.zip"
-module_list["21"]="ESP32-MINI (v2.2.0.0)       |    ESP32/ESP32_MINI/ESP32-MINI-1_AT_Bin_V2.2.0.0.zip"
+# esp32s2-at
+module_list["s1"]="ESP32-S2-WROOM (v2.1.0.0)    |    ESP32S2/ESP32-S2-WROOM/ESP32-S2-WROOM_AT_Bin_V2.1.0.0.zip"
+module_list["sw1"]="ESP32-S2-WROVER (v2.1.0.0)  |    ESP32S2/ESP32-S2-WROVER/ESP32-S2-WROVER_AT_Bin_V2.1.0.0.zip"
+module_list["ss1"]="ESP32-S2-SOLO (v2.1.0.0)    |    ESP32S2/ESP32-S2-SOLO/ESP32-S2-SOLO_AT_Bin_V2.1.0.0.zip"
+module_list["sm1"]="ESP32-S2-MINI (v2.1.0.0)    |    ESP32S2/ESP32-S2-MINI/ESP32-S2-MINI_AT_Bin_V2.1.0.0.zip"
 
 # prompt
 sorted_index=`echo ${!module_list[@]} | xargs -n1 | sort -g | xargs`
