@@ -15,6 +15,23 @@ export try_counts=1
 # save error log if download failed
 export log_file="cmf_failed.log"
 
+WORK_FOLDER=`pwd`
+WORK_FOLDER=`echo ${WORK_FOLDER##*/}`
+
+if [[ "$WORK_FOLDER" =~ ^esp.*at$ ]]; then
+    # just for esp-at project
+    idft=./build.py
+else
+    idft=idf.py
+fi
+
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "NAME\r\n  cmf: $idft -p /dev/ttyUSB* flash\r\n"
+    ESP_LOGN "  cmf : CMake and flash to all device"
+    ESP_LOGN "  cmf [x]: CMake and flash to one device by index 'x', such as 'cmf 1' means: $idft -p /dev/ttyUSB1 flash"
+    exit
+fi
+
 function esp_cmake_all_flash()
 {
     for sp in /dev/ttyUSB*
@@ -40,13 +57,13 @@ function esp_cmake_one_flash()
     if [ -e "/dev/ttyUSB$1" ]; then
         for((i=1;i<=$try_counts;i++));
         do {
-            ESP_LOGI "$IDF_PATH/tools/idf.py -p /dev/ttyUSB$1 -b $cmf_baud flash..."  \
-            && $IDF_PATH/tools/idf.py -p /dev/ttyUSB$1 -b $cmf_baud flash    \
-            && ESP_LOGI "$IDF_PATH/tools/idf.py -p /dev/ttyUSB$1 -b $cmf_baud flash Done!" && break
+            ESP_LOGI "$idft -p /dev/ttyUSB$1 -b $cmf_baud flash..."  \
+            && $idft -p /dev/ttyUSB$1 -b $cmf_baud flash    \
+            && ESP_LOGI "$idft -p /dev/ttyUSB$1 -b $cmf_baud flash Done!" && break
 
-            ESP_LOGW "Try again: $IDF_PATH/tools/idf.py -p /dev/ttyUSB$1 -b $cmf_baud flash [$i/$try_counts]"
+            ESP_LOGW "Try again: $idft -p /dev/ttyUSB$1 -b $cmf_baud flash [$i/$try_counts]"
             if [ $i -eq $try_counts ]; then
-                echo "$IDF_PATH/tools/idf.py -p /dev/ttyUSB$1 -b $cmf_baud flash" >> $log_file
+                echo "$idft -p /dev/ttyUSB$1 -b $cmf_baud flash" >> $log_file
             fi
         }
         done
@@ -55,13 +72,6 @@ function esp_cmake_one_flash()
         exit
     fi
 }
-
-if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\r\n  cmf: \$IDF_PATH/tools/idf.py -p /dev/ttyUSB* flash\r\n"
-    ESP_LOGN "  cmf : CMake and flash to all device"
-    ESP_LOGN "  cmf [x]: CMake and flash to one device by index 'x', such as 'cmf 1' means: \$IDF_PATH/tools/idf.py -p /dev/ttyUSB1 flash"
-    exit
-fi
 
 # check
 if [ $# -gt 1 ]; then
@@ -72,56 +82,10 @@ fi
 # ------------------------------------------------
 ESP_OBJ_CHECK "CMakeLists.txt"
 
-WORK_FOLDER=`pwd`
-WORK_FOLDER=`echo ${WORK_FOLDER##*/}`
-ESP_AT_ENABLE=0
-
-# esp-at for cw
-if [ "$WORK_FOLDER" = "esp32s2-at" ]; then
-    # ESP32S2-AT
-    ESP_AT_ENABLE=1
-    export ESP_AT_PROJECT_PATH=$(pwd)
-    export IDF_PATH=$ESP_AT_PROJECT_PATH/esp-idf
-    mkdir -p build
-    echo "{\"platform\": \"PLATFORM_ESP32S2\", \"module\": \"WROOM\", \"silence\": 0}" > build/module_info.json
-
-elif [ "$WORK_FOLDER" = "esp32-at" ]; then
-    # ESP32-AT
-    ESP_AT_ENABLE=1
-    export ESP_AT_PROJECT_PATH=$(pwd)
-    export IDF_PATH=$ESP_AT_PROJECT_PATH/esp-idf
-    mkdir -p build
-    echo "{\"platform\": \"PLATFORM_ESP32\", \"module\": \"WROOM-32\", \"silence\": 0}" > build/module_info.json
-
-elif [ "$WORK_FOLDER" = "esp32c3-at" ]; then
-    # ESP32C3-AT
-    ESP_AT_ENABLE=1
-    export ESP_AT_PROJECT_PATH=$(pwd)
-    export IDF_PATH=$ESP_AT_PROJECT_PATH/esp-idf
-    mkdir -p build
-    echo "{\"platform\": \"PLATFORM_ESP32C3\", \"module\": \"MINI-1\", \"silence\": 0}" > build/module_info.json
-
-elif [ "$WORK_FOLDER" = "esp8266-at" ]; then
-    # ESP8266-AT
-    ESP_AT_ENABLE=1
-    export ESP_AT_PROJECT_PATH=$(pwd)
-    export IDF_PATH=$ESP_AT_PROJECT_PATH/esp-idf
-    mkdir -p build
-    echo "{\"platform\": \"PLATFORM_ESP8266\", \"module\": \"WROOM-02\", \"silence\": 0}" > build/module_info.json
-fi
-
-ESP_IDF_CHECK
-
 CMAKE_PROJECT=`echo $WORK_FOLDER | tr '[a-z]' '[A-Z]'`
 ESP_LOGI "CMake $CMAKE_PROJECT project.."
 
-# compile
-if [ $ESP_AT_ENABLE -eq 0 ]; then
-    $IDF_PATH/tools/idf.py build || MEXIT "CMake $CMAKE_PROJECT Failed!"
-else
-    ./build.py build || MEXIT "CMake $CMAKE_PROJECT Failed!"
-fi
-
+$idft build || MEXIT "CMake $CMAKE_PROJECT Failed!"
 ESP_LOGIB "CMake project OK!"
 # ------------------------------------------------
 

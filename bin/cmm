@@ -6,18 +6,30 @@ TK_PATH=`realpath $0`
 TK_PATH=`echo ${TK_PATH%/bin*}`
 source $TK_PATH/bin/esptk-export
 
+WORK_FOLDER=`pwd`
+WORK_FOLDER=`echo ${WORK_FOLDER##*/}`
+
+if [[ "$WORK_FOLDER" =~ ^esp.*at$ ]]; then
+    # just for esp-at project
+    idft=./build.py
+else
+    idft=idf.py
+fi
+
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\r\n  cmm: \$IDF_PATH/tools/idf.py -p /dev/ttyUSB* monitor\r\n"
-    ESP_LOGN "  cmm : idf.py monitor on all device"
-    ESP_LOGN "  cmm [x]: idf.py monitor by index 'x', such as 'cmm 0' means: \$IDF_PATH/tools/idf.py -p /dev/ttyUSB0 monitor"
+    ESP_LOGB "NAME\r\n  cmm: $idft -p /dev/ttyUSB* monitor\r\n"
+    ESP_LOGN "  cmm : $idft monitor on all device"
+    ESP_LOGN "  cmm [x]: $idft monitor by index 'x', such as 'cmm 0' means: $idft -p /dev/ttyUSB0 monitor"
     exit
 fi
+
+ESP_OBJ_CHECK "CMakeLists.txt"
 
 function esp_cmm_one_flash()
 {
     if [ -e "/dev/ttyUSB$1" ]; then
-        ESP_LOGI "$IDF_PATH/tools/idf.py -p /dev/ttyUSB$1 monitor"
-        $IDF_PATH/tools/idf.py -p /dev/ttyUSB$1 monitor
+        ESP_LOGI "$idft -p /dev/ttyUSB$1 monitor"
+        $idft -p /dev/ttyUSB$1 monitor
     else
         ESP_LOGW "No /dev/ttyUSB$1 Device!" && exit
     fi
@@ -34,52 +46,15 @@ function esp_cmm_all_flash()
 
         spcounts=`ls -al /dev/ttyUSB* | wc -l`
         if [ $spcounts -eq 1 ]; then
-            ESP_LOGI "$IDF_PATH/tools/idf.py -p $sp monitor"
-            $IDF_PATH/tools/idf.py -p $sp monitor
+            ESP_LOGI "$idft -p $sp monitor"
+            $idft -p $sp monitor
         else
-            ESP_LOGI "+: $IDF_PATH/tools/idf.py -p $sp monitor"
-            gnome-terminal -x bash -c "export IDF_PATH=$IDF_PATH; echo \"$IDF_PATH/tools/idf.py -p $sp monitor\"; $IDF_PATH/tools/idf.py -p $sp monitor"  
+            ESP_LOGI "+: $idft -p $sp monitor"
+            gnome-terminal -x bash -c "export IDF_PATH=$IDF_PATH; echo \"$idft -p $sp monitor\"; $idft -p $sp monitor"  
         fi
     }
     done
 }
-
-ESP_OBJ_CHECK "build"
-ESP_OBJ_CHECK "CMakeLists.txt"
-
-WORK_FOLDER=`pwd`
-WORK_FOLDER=`echo ${WORK_FOLDER##*/}`
-
-# esp-at for cw
-if [ "$WORK_FOLDER" = "esp32s2-at" ]; then
-    # ESP32S2-AT
-    export ESP_AT_PROJECT_PLATFORM=PLATFORM_ESP32S2
-    export ESP_AT_MODULE_NAME=WROOM
-    export ESP_AT_PROJECT_PATH=$(pwd)
-    export IDF_PATH=$ESP_AT_PROJECT_PATH/esp-idf
-
-elif [ "$WORK_FOLDER" = "esp32-at" ]; then
-    # ESP32-AT
-    export ESP_AT_PROJECT_PLATFORM=PLATFORM_ESP32
-    export ESP_AT_MODULE_NAME=WROOM-32
-    export ESP_AT_PROJECT_PATH=$(pwd)
-    export IDF_PATH=$ESP_AT_PROJECT_PATH/esp-idf
-
-elif [ "$WORK_FOLDER" = "esp32c3-at" ]; then
-    # ESP32C3-AT
-    ESP_AT_ENABLE=1
-    export ESP_AT_PROJECT_PATH=$(pwd)
-    export IDF_PATH=$ESP_AT_PROJECT_PATH/esp-idf
-    mkdir -p build
-    echo "{\"platform\": \"PLATFORM_ESP32C3\", \"module\": \"MINI-1\", \"silence\": 0}" > build/module_info.json
-
-elif [ "$WORK_FOLDER" = "esp8266-at" ]; then
-    # ESP8266-AT
-    export ESP_AT_PROJECT_PLATFORM=PLATFORM_ESP8266
-    export ESP_AT_MODULE_NAME=WROOM-02
-    export ESP_AT_PROJECT_PATH=$(pwd)
-    export IDF_PATH=$ESP_AT_PROJECT_PATH/esp-idf
-fi
 
 if [ $# -eq 0 ]; then
     esp_cmm_all_flash
