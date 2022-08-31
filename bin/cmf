@@ -18,7 +18,7 @@ export log_file="cmf_failed.log"
 WORK_FOLDER=`pwd`
 WORK_FOLDER=`echo ${WORK_FOLDER##*/}`
 
-if [[ "$WORK_FOLDER" =~ ^esp.*at$ ]]; then
+if [ -f build.py ]; then
     # just for esp-at project
     idft=./build.py
 else
