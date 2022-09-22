@@ -149,7 +149,7 @@ function at_download_artifact_by_pipeline()
         current_job_state=`cat $job_list | jq -r .[$i-1].status`
         current_job_id=`cat $job_list | jq -r .[$i-1].id`
         current_job_commit=`cat $job_list | jq -r .[$i-1].commit.short_id`
-        printf "| %3d | %-29s | %7s | %7s | %8s |\r\n" $i $current_job_name $current_job_state $current_job_commit $current_job_id
+        printf "| %3d | %-39s | %7s | %7s | %8s |\r\n" $i $current_job_name $current_job_state $current_job_commit $current_job_id
     }
     done
     ESP_LOGIB "-----------------------------------------------------------------------\r\n"
@@ -198,6 +198,11 @@ function at_download_artifact_by_default()
     s_input_url=$pp_url
 }
 
+function cleanup()
+{
+    rm -rf at_latest_pipeline at_pipeline* artifact_*.zip
+}
+
 # 0: download firmware by job
 # 1: download firmware by pipeline
 # 2: download latest firmware
@@ -220,6 +225,9 @@ rm -rf $dst_dir
 unzip $s_artifact_path -d $dst_dir || ESP_LOGE "Unzip $s_artifact_path Failed"
 abs_dst_path=`find $dst_dir -name "factory*.bin" | grep -v param | xargs realpath`
 ESP_LOGIB "ESP-AT Firmware Path ----> $abs_dst_path"
+
+# clean up
+cleanup
 
 # flash to chip
 if [ $s_fw_burning_flag -eq 1 ]; then
