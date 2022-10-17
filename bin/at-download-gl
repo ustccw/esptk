@@ -116,7 +116,7 @@ function at_download_artifact_by_job_id()
     rm -rf $s_artifact_path
     # Script should lookup the job status before download job artifact,
     # But for simplicity, we ignore this step.
-    curl --output $s_artifact_path --header "PRIVATE-TOKEN: $oauth_token" "$gitlab_api_url_prefix/$at_project_id/jobs/$s_job_id/artifacts" || ESP_LOGE "Curl GitLab Artifacts Failed"
+    curl --insecure --output $s_artifact_path --header "PRIVATE-TOKEN: $oauth_token" "$gitlab_api_url_prefix/$at_project_id/jobs/$s_job_id/artifacts" || ESP_LOGE "Curl GitLab Artifacts Failed"
     s_artifact_path=`realpath $s_artifact_path`
     if [ `cat $s_artifact_path | wc -c` -lt 50 ]; then
         msg=`cat $s_artifact_path`
@@ -135,14 +135,14 @@ function at_download_artifact_by_pipeline()
     job_list=at_pipeline_$pipeline_id
     rm -rf $job_list
 
-    curl --output $job_list --header "PRIVATE-TOKEN: $oauth_token" "$gitlab_api_url_prefix/$at_project_id/pipelines/$pipeline_id/jobs" || ESP_LOGE "Curl GitLab Pipelines Failed"
+    curl --insecure --output $job_list --header "PRIVATE-TOKEN: $oauth_token" "$gitlab_api_url_prefix/$at_project_id/pipelines/$pipeline_id/jobs?per_page=100" || ESP_LOGE "Curl GitLab Pipelines Failed"
 
     node_cnt=`cat $job_list | jq ". | length"`
     ESP_LOGIB "\r\nFound $node_cnt jobs at pipeline: $s_input_url\r\n"
 
-    ESP_LOGIB "-----------------------------------------------------------------------"
-    ESP_LOGIB "| idx |           job name            |  state  |  commits |  job id  |"
-    ESP_LOGIB "-----------------------------------------------------------------------"
+    ESP_LOGIB "---------------------------------------------------------------------------------"
+    ESP_LOGIB "| idx |                job name                 |  state  |  commits |  job id  |"
+    ESP_LOGIB "---------------------------------------------------------------------------------"
     for i in $(seq ${node_cnt})
     do {
         current_job_name=`cat $job_list | jq -r .[$i-1].name`
@@ -152,7 +152,7 @@ function at_download_artifact_by_pipeline()
         printf "| %3d | %-39s | %7s | %7s | %8s |\r\n" $i $current_job_name $current_job_state $current_job_commit $current_job_id
     }
     done
-    ESP_LOGIB "-----------------------------------------------------------------------\r\n"
+    ESP_LOGIB "---------------------------------------------------------------------------------\r\n"
 
     # read index
     echo -n  "Select the one of the above firmware you would like to download by index (1-$node_cnt, default 7): "
@@ -184,7 +184,7 @@ function at_download_artifact_by_default()
     ESP_LOGI "Fetching Latest esp-at pipeline information.."
     job_list=at_latest_pipeline
     rm -rf $job_list
-    curl --output $job_list --header "PRIVATE-TOKEN: $oauth_token" "$gitlab_api_url_prefix/$at_project_id/pipelines?status=success&per_page=1&page=1" || ESP_LOGE "Curl GitLab Latest Pipeline Failed"
+    curl --insecure --output $job_list --header "PRIVATE-TOKEN: $oauth_token" "$gitlab_api_url_prefix/$at_project_id/pipelines?status=success&per_page=1&page=1" || ESP_LOGE "Curl GitLab Latest Pipeline Failed"
 
     ESP_LOGI "Got Latest Pipeline, Information:"
     pp_id=`cat $job_list | jq -r .[0].id`
