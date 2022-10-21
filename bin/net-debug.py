@@ -98,7 +98,8 @@ void lwip_print_tcp_info(void *buf, bool is_send)
 """
 
 # Find the TCP Tx entry, and add this Rx print info
-dbg_tx_caller_pos_pattern = 'if(q->next == NULL) {'
+dbg_tx_caller_pos_pattern_esp_idf = 'if(q->next == NULL) {'
+dbg_tx_caller_pos_pattern_rtos = 'if (!netif_is_up(netif)) {'
 esp_lwip_tcp_debug_tx = """
     lwip_print_tcp_info(p, true);
 """
@@ -137,11 +138,17 @@ def main():
         data = data[:pos] + esp_lwip_tcp_dbg_func + data[pos:]
 
         # add tx caller of lwip_print_tcp_info()
-        pos = data.find(dbg_tx_caller_pos_pattern)
+        pos = data.find(dbg_tx_caller_pos_pattern_esp_idf)
+        if pos < 0:
+            pos = data.find(dbg_tx_caller_pos_pattern_rtos)
+            if pos < 0:
+                raise Exception('No Tx caller entry found.')
         data = data[:pos] + esp_lwip_tcp_debug_tx + '\n    '  + data[pos:]
 
         # add rx caller of lwip_print_tcp_info()
         pos = data.find(dbg_rx_caller_pos_pattern)
+        if pos < 0:
+            raise Exception('No Rx caller entry found.')
         data = data[:pos] + esp_lwip_tcp_debug_rx + '\n    ' + data[pos:]
 
         f.seek(0)
