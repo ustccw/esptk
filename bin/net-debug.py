@@ -22,7 +22,8 @@ def ESP_LOGN(x):
 def print_help():
     ESP_LOGB('Usage: enter ESP-IDF directory and run this script "python {}".\r\n'.format(sys.argv[0]))
     ESP_LOGN('  This is a simple tool to help debuging TCP and above protocol.')
-    ESP_LOGN('  It will print all TCP Tx and TCP Rx packets information, which includes tcp len, tcp seq, tcp ack, src port, dest port, and tcp flags.')
+    ESP_LOGN('  It will print all TCP Tx and TCP Rx packets information, which includes ip len, tcp len, tcp seq, tcp ack, src port, dest port, and tcp flags.')
+    ESP_LOGN('  TCP flags is the accumulation of CWR:128, ECN:64, Urgent:32, Ack:16, Push:8, Reset:4, SYN:2, FIN:1')
 
 # Actually, this file is applied to all netif layer
 wlanif_c_file = 'wlanif.c'
@@ -33,7 +34,7 @@ duplicate_check_pattern = 'lwip_print_tcp_info'
 dbg_func_pos_pattern = 'In this function, the hardware should be initialized.'
 dbg_func_pos_offset = 8
 esp_lwip_tcp_dbg_func = """
-#include "esp_log.h"
+#include <stdio.h>
 void lwip_print_tcp_info(void *buf, bool is_send)
 {
   if (buf) {
@@ -58,8 +59,12 @@ void lwip_print_tcp_info(void *buf, bool is_send)
       }
       if (tcp_flag) {
           if (i >= 40) { /*tcp data*/
-              uint32_t len, seq, ack, srcport, destport, flags;
-              len = i;
+              uint32_t ip_tlen, seq, ack, srcport, destport, flags;
+              uint32_t ip_header_len, tcp_header_len, tcp_data_len;
+              ip_header_len = (*((unsigned char*)p->payload + 14) & 0x0F) * 4;
+              tcp_header_len = ((*((unsigned char*)p->payload + 46) & 0xF0) >> 4) * 4;
+              tcp_data_len = i - ip_header_len - tcp_header_len; /* i = total length of ip fragment */
+              ip_tlen = i;
               i = *((unsigned char*)p->payload + 38);
               i <<= 8;
               i += *((unsigned char*)p->payload + 39);
@@ -87,9 +92,9 @@ void lwip_print_tcp_info(void *buf, bool is_send)
               flags = *((unsigned char *)p->payload + 47);
 
               if (is_send) {
-                  ESP_LOGI("TEST", "@@ WiFi Tx TCP - L:%u, S:%u, A:%u, SP:%u, DP:%u, F:%x", len, seq, ack, srcport, destport, flags);
+                  printf("@@ WiFi Tx TCP - IPL:%u, S:%u, A:%u, SP:%u, DP:%u, F:%x, TDL:%u\\n", ip_tlen, seq, ack, srcport, destport, flags, tcp_data_len);
               } else {
-                  ESP_LOGI("TEST", "@@ WiFi Rx TCP - L:%u, S:%u, A:%u, SP:%u, DP:%u, F:%x", len, seq, ack, srcport, destport, flags);
+                  printf("@@ WiFi Rx TCP - IPL:%u, S:%u, A:%u, SP:%u, DP:%u, F:%x, TDL:%u\\n", ip_tlen, seq, ack, srcport, destport, flags, tcp_data_len);
               }
           }
       }
