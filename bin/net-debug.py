@@ -28,77 +28,127 @@ def print_help():
 # Actually, this file is applied to all netif layer
 wlanif_c_file = 'wlanif.c'
 # In cause of dupilcate patch
-duplicate_check_pattern = 'lwip_print_tcp_info'
+duplicate_check_pattern = 'lwip_print_pkt_info'
 
 # Find the debug function entry, and add this print function
 dbg_func_pos_pattern = 'In this function, the hardware should be initialized.'
 dbg_func_pos_offset = 8
 esp_lwip_tcp_dbg_func = """
 #include <stdio.h>
-void lwip_print_tcp_info(void *buf, bool is_send)
+static uint16_t s_tcp_port = 0;     /* watch all tcp link */
+static uint16_t s_udp_port = 1234;  /* watch one udp link which port == 1234 in case of udp rx flooding */
+/* only support tcp, udp, icmp now. attention: don't support ip fragment now. */
+void lwip_print_pkt_info(void *buf, bool is_send)
 {
-  if (buf) {
-      struct pbuf* p = (struct pbuf*)buf;
-      if (p->tot_len < 50) {
-          return;
-      }
-      uint32_t i;
-      bool tcp_flag = false;
-      i = *((unsigned char*)p->payload + 12);
-      if (i == 0x08) { /*ipv4*/
-          i = *((unsigned char*)p->payload + 13);
-          if (i == 0) {
-              i = *((unsigned char*)p->payload + 23);
-              if (i == 0x06) { /*tcp*/
-                  i = *((unsigned char*)p->payload + 16);
-                  i <<= 8;
-                  i += *((unsigned char*)p->payload + 17);
-                  tcp_flag = true;
-              }
-          }
-      }
-      if (tcp_flag) {
-          if (i >= 40) { /*tcp data*/
-              uint32_t ip_tlen, seq, ack, srcport, destport, flags;
-              uint32_t ip_header_len, tcp_header_len, tcp_data_len;
-              ip_header_len = (*((unsigned char*)p->payload + 14) & 0x0F) * 4;
-              tcp_header_len = ((*((unsigned char*)p->payload + 46) & 0xF0) >> 4) * 4;
-              tcp_data_len = i - ip_header_len - tcp_header_len; /* i = total length of ip fragment */
-              ip_tlen = i;
-              i = *((unsigned char*)p->payload + 38);
-              i <<= 8;
-              i += *((unsigned char*)p->payload + 39);
-              i <<= 8;
-              i += *((unsigned char*)p->payload + 40);
-              i <<= 8;
-              i += *((unsigned char*)p->payload + 41);
-              seq = i;
-              i = *((unsigned char*)p->payload + 42);
-              i <<= 8;
-              i += *((unsigned char*)p->payload + 43);
-              i <<= 8;
-              i += *((unsigned char*)p->payload + 44);
-              i <<= 8;
-              i += *((unsigned char*)p->payload + 45);
-              ack = i;
-              i = *((unsigned char*)p->payload + 34);
-              i <<= 8;
-              i += *((unsigned char*)p->payload + 35);
-              srcport = i;
-              i = *((unsigned char*)p->payload + 36);
-              i <<= 8;
-              i += *((unsigned char*)p->payload + 37);
-              destport = i;
-              flags = *((unsigned char *)p->payload + 47);
+    if (!buf) {
+        return;
+    }
+    // length check
+    struct pbuf *p = (struct pbuf *)buf;
+    if (p->tot_len <= 34) { /* no a valid IPv4 header */
+        return;
+    }
 
-              if (is_send) {
-                  printf("@@ WiFi Tx TCP - IPL:%u, S:%u, A:%u, SP:%u, DP:%u, F:%x, TDL:%u\\n", ip_tlen, seq, ack, srcport, destport, flags, tcp_data_len);
-              } else {
-                  printf("@@ WiFi Rx TCP - IPL:%u, S:%u, A:%u, SP:%u, DP:%u, F:%x, TDL:%u\\n", ip_tlen, seq, ack, srcport, destport, flags, tcp_data_len);
-              }
-          }
-      }
-  }
+    // network protocol check
+    typedef enum {
+        NET_PROTO_IPV4 = 0x0800,
+        NET_PROTO_IPV6 = 0x86DD,
+        NET_PROTO_ARP  = 0x0806,
+    } net_proto_t;
+    uint16_t net_proto;
+    /* p->payload consists of sequential: dst mac(6B) + src mac(6B) + proto type (2B) + IP4 header (20B+) + etc */
+    net_proto = *((uint8_t *)p->payload + 12);
+    net_proto <<= 8;
+    net_proto += *((uint8_t *)p->payload + 13);
+    if (net_proto != NET_PROTO_IPV4) { /* only support IPv4+ protocol now */
+        return;
+    }
+
+    /* IPv4+ protocol check */
+    typedef enum {
+        IP4_PROTO_ICMP = 1,
+        IP4_PROTO_IGMP = 2,
+        IP4_PROTO_TCP  = 6, /* SSL, HTTP, FTP, SMTP,TELNET, SSH */
+        IP4_PROTO_UDP = 17, /* DNS, SNTP, TFTP, SNMP */
+    } ipv4_base_t;
+    uint8_t *ip4 = (uint8_t *)p->payload + 14;
+    uint8_t ip_proto = *(ip4 + 9);
+    uint16_t ip_tlen = *(ip4 + 2);
+    ip_tlen <<= 8;
+    ip_tlen += *(ip4 + 3);
+    uint16_t ip_hlen = (*ip4 & 0x0F) * 4;
+    uint16_t ip_dlen = ip_tlen - ip_hlen;
+
+    // print key information for ip protocols
+    switch (ip_proto) {
+    case IP4_PROTO_TCP: {
+        if (ip_dlen < 20) {
+            return;
+        }
+        uint8_t *tcp = ip4 + ip_hlen;
+        uint16_t src_port = *tcp; src_port <<= 8; src_port += *(tcp + 1);
+        uint16_t dst_port = *(tcp + 2); dst_port <<= 8; dst_port += *(tcp + 3);
+        uint32_t seq = *(tcp + 4); seq <<= 8; seq += *(tcp + 5); seq <<= 8; seq += *(tcp + 6); seq <<= 8; seq += *(tcp + 7);
+        uint32_t ack = *(tcp + 8); ack <<= 8; ack += *(tcp + 9); ack <<= 8; ack += *(tcp + 10); ack <<= 8; ack += *(tcp + 11);
+        uint8_t tcp_hlen = ((*(tcp + 12) & 0xF0) >> 4) * 4;
+        uint8_t flags = *(tcp + 13);
+        uint16_t tcp_dlen = ip_dlen - tcp_hlen;
+        if (s_tcp_port != 0 && src_port != s_tcp_port && dst_port != s_tcp_port) {
+            return;
+        }
+        if (is_send) {
+            printf("@@ WiFi Tx TCP - IPL:%u, S:%u, A:%u, SP:%u, DP:%u, F:0x%x, TDL:%u\\n", ip_tlen, seq, ack, src_port, dst_port, flags, tcp_dlen);
+        } else {
+            printf("@@ WiFi Rx TCP - IPL:%u, S:%u, A:%u, SP:%u, DP:%u, F:0x%x, TDL:%u\\n", ip_tlen, seq, ack, src_port, dst_port, flags, tcp_dlen);
+        }
+    }
+        break;
+
+    case IP4_PROTO_UDP: {
+        if (ip_dlen < 8) {
+            return;
+        }
+        uint8_t *udp = ip4 + ip_hlen;
+        uint16_t src_port = *udp; src_port <<= 8; src_port += *(udp + 1);
+        uint16_t dst_port = *(udp + 2); dst_port <<= 8; dst_port += *(udp + 3);
+        uint16_t udp_dlen = ip_dlen - 8; /* fixed length: 8 bytes for udp header */
+        if (s_udp_port != 0 && src_port != s_udp_port && dst_port != s_udp_port) {
+            return;
+        }
+        if (is_send) {
+            printf("@@ WiFi Tx UDP - IPL:%u, SP:%u, DP:%u, UDL:%u\\n", ip_tlen, src_port, dst_port, udp_dlen);
+        } else {
+            printf("@@ WiFi Rx UDP - IPL:%u, SP:%u, DP:%u, UDL:%u\\n", ip_tlen, src_port, dst_port, udp_dlen);
+        }
+    }
+        break;
+
+    case IP4_PROTO_ICMP: {
+        if (ip_dlen < 8) {
+            return;
+        }
+        uint8_t *icmp = ip4 + ip_hlen;
+        uint8_t type = *icmp;
+        uint8_t code = *(icmp + 1);
+        bool valid_type = (type == 0 || type == 8); /* icmp echo-request or echo-reply */
+        bool valid_code = (code == 0);
+        uint16_t icmp_dlen = ip_dlen - 8; /* fixed length: 8 bytes for icmp echo-request or echo-reply */
+        if (!valid_type || !valid_code) {
+            return;
+        }
+        uint16_t id = *(icmp + 4); id <<= 8; id += *(icmp + 5);
+        uint16_t seq = *(icmp + 6); seq <<= 8; seq += *(icmp + 7);
+        if (is_send) {
+            printf("@@ WiFi Tx ICMP - %s, IPL:%u, ID:0x%x, S:%u PDL:%u\\n", (type == 8) ? "Echo" : "Echo Reply", ip_tlen, id, seq, icmp_dlen);
+        } else {
+            printf("@@ WiFi Rx ICMP - %s, IPL:%u, ID:0x%x, S:%u PDL:%u\\n", (type == 8) ? "Echo" : "Echo Reply", ip_tlen, id, seq, icmp_dlen);
+        }
+    }
+        break;
+
+    default:
+        return;
+    }
 }
 """
 
@@ -106,13 +156,13 @@ void lwip_print_tcp_info(void *buf, bool is_send)
 dbg_tx_caller_pos_pattern_esp_idf = 'if(q->next == NULL) {'
 dbg_tx_caller_pos_pattern_rtos = 'if (!netif_is_up(netif)) {'
 esp_lwip_tcp_debug_tx = """
-    lwip_print_tcp_info(p, true);
+    lwip_print_pkt_info(p, true);
 """
 
 # Find the TCP Rx entry, and add this Rx print info
 dbg_rx_caller_pos_pattern = '/* full packet send to tcpip_thread to process */'
 esp_lwip_tcp_debug_rx = """
-    lwip_print_tcp_info(p, false);
+    lwip_print_pkt_info(p, false);
 """
 
 def findfile(start, name):
@@ -138,11 +188,11 @@ def main():
             ESP_LOGI("Already applied this patch in {}".format(wlanif_abspath))
             sys.exit(0)
 
-        # add definition of lwip_print_tcp_info()
+        # add definition of lwip_print_pkt_info()
         pos = data.find(dbg_func_pos_pattern) - dbg_func_pos_offset
         data = data[:pos] + esp_lwip_tcp_dbg_func + data[pos:]
 
-        # add tx caller of lwip_print_tcp_info()
+        # add tx caller of lwip_print_pkt_info()
         pos = data.find(dbg_tx_caller_pos_pattern_esp_idf)
         if pos < 0:
             pos = data.find(dbg_tx_caller_pos_pattern_rtos)
@@ -150,7 +200,7 @@ def main():
                 raise Exception('No Tx caller entry found.')
         data = data[:pos] + esp_lwip_tcp_debug_tx + '\n    '  + data[pos:]
 
-        # add rx caller of lwip_print_tcp_info()
+        # add rx caller of lwip_print_pkt_info()
         pos = data.find(dbg_rx_caller_pos_pattern)
         if pos < 0:
             raise Exception('No Rx caller entry found.')
