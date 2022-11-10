@@ -21,9 +21,18 @@ def ESP_LOGN(x):
 
 def print_help():
     ESP_LOGB('Usage: enter ESP-IDF directory and run this script "python {}".\r\n'.format(sys.argv[0]))
-    ESP_LOGN('  This is a simple tool to help debuging TCP and above protocol.')
-    ESP_LOGN('  It will print all TCP Tx and TCP Rx packets information, which includes ip len, tcp len, tcp seq, tcp ack, src port, dest port, and tcp flags.')
-    ESP_LOGN('  TCP flags is the accumulation of CWR:128, ECN:64, Urgent:32, Ack:16, Push:8, Reset:4, SYN:2, FIN:1')
+    ESP_LOGN('  This is a simple tool to help debuging TCP/UDP/ICMP and above protocol.')
+    ESP_LOGN('  (Attention: this script does not support IP fragment and IPv6 till now.)')
+    ESP_LOGB('\r\n  TCP:')
+    ESP_LOGN('    It will print all outgoing (TCP Tx) and incoming (TCP Rx) packets information, which includes ip total len, tcp data len, tcp seq, tcp ack, src port, dest port, and tcp flags.')
+    ESP_LOGN('    TCP flags is the accumulation of CWR:128, ECN:64, Urgent:32, Ack:16, Push:8, Reset:4, SYN:2, FIN:1.')
+    ESP_LOGB('\r\n  UDP:')
+    ESP_LOGN('    It will print all outgoing (UDP Tx) and incoming (UDP Rx) packets information which src port or dst port is 1234.')
+    ESP_LOGN('    (you can specify any other port or all ports by modifying s_udp_port variable of file: {}, which in ESP-IDF)'.format(wlanif_c_file))
+    ESP_LOGN('    packets information includes ip total len, src port, dest port, and udp data len.')
+    ESP_LOGB('\r\n  ICMP:')
+    ESP_LOGN('    It will print all outgoing (ICMP Tx) and incoming (ICMP Rx) packets information which icmp type is echo-request (8) or echo-reply (0),')
+    ESP_LOGN('    packets information includes ip total len, icmp type, id, seq, and icmp data len.')
 
 # Actually, this file is applied to all netif layer
 wlanif_c_file = 'wlanif.c'
