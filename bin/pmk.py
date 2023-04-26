@@ -2,7 +2,6 @@
 #-*- coding: utf-8 -*-
 # chenwu@espressif.com
 
-import hmac
 import hashlib
 
 def calculate_pmk(ssid, password):
