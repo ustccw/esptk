@@ -59,11 +59,11 @@ void lwip_print_pkt_info(void *buf, bool is_send)
     }
 
     // network protocol check
-    typedef enum {
+    enum {
         NET_PROTO_IPV4 = 0x0800,
         NET_PROTO_IPV6 = 0x86DD,
         NET_PROTO_ARP  = 0x0806,
-    } net_proto_t;
+    };
     uint16_t net_proto;
     /* p->payload consists of sequential: dst mac(6B) + src mac(6B) + proto type (2B) + IP4 header (20B+) + etc */
     net_proto = *((uint8_t *)p->payload + 12);
@@ -74,12 +74,12 @@ void lwip_print_pkt_info(void *buf, bool is_send)
     }
 
     /* IPv4+ protocol check */
-    typedef enum {
+    enum {
         IP4_PROTO_ICMP = 1,
         IP4_PROTO_IGMP = 2,
         IP4_PROTO_TCP  = 6, /* SSL, HTTP, FTP, SMTP,TELNET, SSH */
         IP4_PROTO_UDP = 17, /* DNS, SNTP, TFTP, SNMP */
-    } ipv4_base_t;
+    };
     uint8_t *ip4 = (uint8_t *)p->payload + 14;
     uint8_t ip_proto = *(ip4 + 9);
     uint16_t ip_tlen = *(ip4 + 2);
