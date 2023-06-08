@@ -33,7 +33,7 @@ def search_function_in_a_files(files, function_name):
     ret = []
     for file in files:
         try:
-            cmd = 'nm {} | grep {} | grep " T "'.format(file, function_name)
+            cmd = 'nm {} | grep {} | grep -E " T | t "'.format(file, function_name)
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
             if result.returncode == 0:
                 ret.append((file, result.stdout))
