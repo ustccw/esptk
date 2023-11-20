@@ -9,19 +9,19 @@ import argparse
 AT_FIRMWARES = {
     "ESP32-C2": {
         "local": False,
-        "firmwares": {
+        "firmwares": [
             {"ESP32-C2-4MB (v3.3.0.0)": "esp32c2/ESP32-C2-4MB-V3.3.0.0.zip"},
             {"ESP32-C2-2MB (v3.3.0.0)": "esp32c2/ESP32-C2-2MB-V3.3.0.0.zip"},
             {"ESP32-C2-4MB (v3.1.0.0)": "esp32c2/ESP32-C2-4MB-V3.1.0.0.zip"},
             {"ESP32-C2-2MB (v3.1.0.0)": "esp32c2/ESP32-C2-2MB-V3.1.0.0.zip"},
             {"ESP32-C2-4MB (v3.0.0.0)": "esp32c2/ESP32-C2-4MB-V3.0.0.0.zip"},
             {"ESP32-C2-4MB (v3.0.0.0)": "esp32c2/ESP32-C2-4MB-V3.0.0.0.zip"},
-        }
+        ],
     },
 
     "ESP32-C3": {
         "local": False,
-        "firmwares": {
+        "firmwares": [
             {"ESP32-C3-MINI-1 (v3.3.0.0)": "esp32c3/ESP32-C3-MINI-1-AT-V3.3.0.0.zip"},
             {"ESP32-C3-MINI-1 (v3.2.0.0)": "esp32c3/ESP32-C3-MINI-1-AT-V3.2.0.0.zip"},
             {"ESP32-C3-MINI-1 (v2.4.2.0)": "esp32c3/ESP32-C3-MINI-1-AT-V2.4.2.0.zip"},
@@ -29,19 +29,19 @@ AT_FIRMWARES = {
             {"ESP32-C3-MINI-1 (v2.4.0.0)": "esp32c3/ESP32-C3-MINI-1-AT-V2.4.0.0.zip"},
             {"ESP32-C3-MINI-1 (v2.3.0.0)": "esp32c3/ESP32-C3-MINI-1-AT-V2.3.0.0.zip"},
             {"ESP32-C3-MINI-1 (v2.2.0.0)": "esp32c3/ESP32-C3-MINI-1-AT-V2.2.0.0.zip"},
-        }
+        ],
     },
 
     "ESP32-C6": {
         "local": False,
-        "firmwares": {
+        "firmwares": [
             {"ESP32-C6-4MB (v4.0.0.0)": "esp32c6/ESP32-C6-4MB-AT-V4.0.0.0.zip"},
-        },
+        ],
     },
 
     "ESP32": {
         "local": False,
-        "firmwares": {
+        "firmwares": [
             # ESP32-WROOM-32
             {"ESP32-WROOM-32 (v3.3.0.0)": "esp32/ESP32-WROOM-32/ESP32-WROOM-32-AT-V3.3.0.0.zip"},
             {"ESP32-WROOM-32 (v3.2.0.0)": "esp32/ESP32-WROOM-32/ESP32-WROOM-32-AT-V3.2.0.0.zip"},
@@ -84,23 +84,23 @@ AT_FIRMWARES = {
             {"ESP32-MINI-1 (v2.4.3.0)": "esp32/ESP32-MINI-1/ESP32-MINI-1-AT-V2.4.3.0.zip"},
             {"ESP32-MINI-1 (v2.4.0.0)": "esp32/ESP32-MINI-1/ESP32-MINI-1-AT-V2.4.0.0.zip"},
             {"ESP32-MINI-1 (v2.2.0.0)": "esp32/ESP32-MINI-1/ESP32-MINI-1-AT-V2.2.0.0.zip"},
-        },
+        ],
     },
 
     "ESP8266": {
         "local": False,
-        "firmwares": {
+        "firmwares": [
             {"ESP-WROOM-02 (v2.2.1.0)": "esp8266/ESP-WROOM-02-AT-V2.2.1.0.zip"},
             {"ESP-WROOM-02 (v2.2.0.0)": "esp8266/ESP-WROOM-02-AT-V2.2.0.0.zip"},
             {"ESP-WROOM-02N (v2.2.0.0)": "esp8266/ESP-WROOM-02N-AT-V2.2.0.0.zip"},
             {"ESP-WROOM-02 (v2.1.0.0)": "esp8266/ESP-WROOM-02-AT-V2.1.0.0.zip"},
             {"ESP-WROOM-02 (v2.0.0.0)": "esp8266/ESP-WROOM-02-AT-V2.0.0.0.zip"},
-        },
+        ],
     },
 
     "ESP8266 (NONOS)": {
         "local": False,
-        "firmwares": {
+        "firmwares": [
             {"ESP-WROOM-02 (v1.7.5.0)": "nonos/esp8266_at_bin_v1.7.5.zip"},
             {"ESP-WROOM-02 (v1.7.4.0)": "nonos/esp8266_at_bin_v1.7.4.zip"},
             {"ESP-WROOM-02 (v1.7.3.0)": "nonos/esp8266_at_bin_v1.7.3.zip"},
@@ -111,26 +111,26 @@ AT_FIRMWARES = {
             {"ESP-WROOM-02 (v1.6.1.0)": "nonos/esp8266_at_bin_v1.6.1.zip"},
             {"ESP-WROOM-02 (v1.6.0.0)": "nonos/esp8266_at_bin_v1.6.0.zip"},
             {"ESP-WROOM-02 (v1.5.1.0)": "nonos/esp8266_at_bin_v1.5.1.zip"},
-        },
+        ],
     },
 
     "ESP32-S2": {
         "local": True,
         "path_dir": "~/esp/at/release-related/esp-at-dl",
-        "firmwares": {
+        "firmwares": [
             {"ESP32-S2-SOLO (v2.1.0.0)": "esp32s2/ESP32-S2-SOLO/ESP32-S2-SOLO-AT-V2.1.0.0.zip"},
             {"ESP32-S2-WROVER (v2.1.0.0)": "esp32s2/ESP32-S2-WROVER/ESP32-S2-WROVER-AT-V2.1.0.0.zip"},
             {"ESP32-S2-WROOM (v2.1.0.0)": "esp32s2/ESP32-S2-WROOM/ESP32-S2-WROOM-AT-V2.1.0.0.zip"},
             {"ESP32-S2-MINI (v2.1.0.0)": "esp32s2/ESP32-S2-MINI/ESP32-S2-MINI-AT-V2.1.0.0.zip"},
-        },
+        ],
     },
 
     "ESP8266 (QCLOUD)": {
         "local": False,
-        "firmwares": {
+        "firmwares": [
             {"ESP8266-AT QCLOUD (v2.2.0)": "qcloud/qcloud_at_esp8266_v2.2.0.zip"},
             {"ESP8266-AT QCLOUD (v2.1.1)": "qcloud/qcloud_at_esp8266_v2.1.1.zip"},
-        }
+        ],
     }
 }
 
@@ -140,15 +140,75 @@ def ESP_LOGI(x):
 def ESP_LOGE(x):
     print("\033[31m{}\033[0m".format(x))
 
-def main():
-    parser = argparse.ArgumentParser(description='ESP-AT firmware downloader')
-    parser.add_argument('-p', '--port', dest='port', help='Serial port device', default='/dev/ttyUSB0')
-    parser.add_argument('-b', '--baud', dest='baud', help='Serial port baud rate', default=921600, type=int)
-    parser.add_argument('-a', '--all', dest='all', help='List all firmwares for current chip', default=None)
-    parser.add_argument('-t', '--esptool', dest='esptool', help='The path of esptool.py', default=None)
+def ESP_LOGB(x):
+    print("\033[1m{}\033[0m".format(x))
 
-    args = parser.parse_args()
-    print(args)
+def ESP_LOGN(x):
+    print("{}".format(x))
+
+def ESP_LOGB0(x):
+    print("\033[1m{}\033[0m".format(x), end='')
+
+def at_choose_firmware(list_all):
+    for index, key in enumerate(AT_FIRMWARES):
+        ESP_LOGI("{}: {}".format(index, key))
+
+    ESP_LOGB0("Select the released firmware you would like to download by index (default 0): ")
+    chip_id = input().strip()
+    
+    if chip_id == '':
+        chip_id = 0
+
+    for index, key in enumerate(AT_FIRMWARES):
+        if index == int(chip_id):
+            firmware_list = AT_FIRMWARES[key]['firmwares']
+            for module_id, key in enumerate(firmware_list):
+                for module_name, module_url in key.items():
+                    ESP_LOGI("{}: {}".format(module_id, module_name))
+                # print('id:{} firmware list:{}'.format(module_id, firmware_list))
+
+
+    return None
+
+def esp_show_help():
+    ESP_LOGB("NAME\r\n  at-released.py: Download the released firmware of esp-at project from AT Binary Lists\r\n")
+    ESP_LOGN("  at-released.py: just download the firmware from a short binary list")
+    ESP_LOGN("  at-released.py -a: just download the firmware from a long binary list")
+    ESP_LOGN("  at-released.py [x]: download the firmware from a short binary list and write flash by /dev/ttyUSBx")
+    ESP_LOGN("  at-released.py [x] -a: download the firmware from a long binary list and write flash by /dev/ttyUSBx")
+
+def main():
+
+    argv = sys.argv[1:]
+
+    if '-h' in argv or '--help' in argv:
+        esp_show_help()
+        sys.exit(0)
+
+    list_all = False
+    download_usb = None
+
+    if len(argv) == 0:
+        pass
+    elif len(argv) == 1:
+        if argv[0] == '-a':
+            list_all = True
+        else:
+            download_usb = '/dev/ttyUSB' + argv[0]
+    elif len(argv) == 2:
+        list_all = True
+        download_usb = '/dev/ttyUSB' + argv[0]
+    elif len(argv) > 2:
+        ESP_LOGE("Too many arguments")
+        esp_show_help()
+        sys.exit(1)
+
+    if download_usb and not os.path.exists(download_usb) :
+        ESP_LOGE("The device {} does not exist".format(download_usb))
+        sys.exit(1)
+
+    result = at_choose_firmware(list_all)
+
 
 class FatalError(RuntimeError):
     """
