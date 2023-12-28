@@ -54,7 +54,7 @@ fi
 lcfg="$USER@$HOSTNAME.com"
 rcfg=`cat $0 | head -n 2 | tail -n 1 | awk '{print $2}'`
 if [ "$lcfg" == "$rcfg" ]; then
-    dst_dir=~/$USER/GShare
+    dst_dir=~/$USER/share
 fi
 
 # copy
