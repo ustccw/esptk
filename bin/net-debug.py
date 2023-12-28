@@ -27,8 +27,8 @@ def print_help():
     ESP_LOGN('    It will print all outgoing (TCP Tx) and incoming (TCP Rx) packets information, which includes ip total len, tcp data len, tcp seq, tcp ack, src port, dest port, and tcp flags.')
     ESP_LOGN('    TCP flags is the accumulation of CWR:128, ECN:64, Urgent:32, Ack:16, Push:8, Reset:4, SYN:2, FIN:1.')
     ESP_LOGB('\r\n  UDP:')
-    ESP_LOGN('    It will print all outgoing (UDP Tx) and incoming (UDP Rx) packets information which src port or dst port is 1234.')
-    ESP_LOGN('    (you can specify any other port or all ports by modifying s_udp_port variable of file: {}, which in ESP-IDF)'.format(wlanif_c_file))
+    ESP_LOGN('    It will print all outgoing (UDP Tx) packets information with any port and some incoming (UDP Rx) packets information which src port or dst port is 1234 or 333.')
+    ESP_LOGN('    (you can specify any other port or all ports by modifying s_udp_port_tx and s_udp_port_rx variable of file: {}, which in ESP-IDF)'.format(wlanif_c_file))
     ESP_LOGN('    packets information includes ip total len, src port, dest port, and udp data len.')
     ESP_LOGB('\r\n  ICMP:')
     ESP_LOGN('    It will print all outgoing (ICMP Tx) and incoming (ICMP Rx) packets information which icmp type is echo-request (8) or echo-reply (0),')
@@ -44,8 +44,35 @@ dbg_func_pos_pattern = 'In this function, the hardware should be initialized.'
 dbg_func_pos_offset = 8
 esp_lwip_tcp_dbg_func = """
 #include <stdio.h>
-static uint16_t s_tcp_port = 0;     /* watch all tcp link */
-static uint16_t s_udp_port = 1234;  /* watch one udp link which port == 1234 in case of udp rx flooding */
+static uint16_t s_tcp_port = 0;                 /* watch all tcp link */
+static uint16_t s_udp_port_tx[] = {0};          /* watch all udp tx packets, you can specify your ports here */
+static uint16_t s_udp_port_rx[] = {1234, 333};  /* watch udp rx packets which port==1234 or port==333, you can specify your ports here. you should not set port to 0 in case of udp rx flooding */
+
+static bool udp_accept_print(uint16_t src_port, uint16_t dst_port, bool is_send)
+{
+    if (is_send) {
+        if (s_udp_port_tx[0] == 0) {
+            return true;
+        }
+        for (int i = 0; i < sizeof(s_udp_port_tx) / sizeof(s_udp_port_tx[0]); ++i) {
+            if (src_port == s_udp_port_tx[i] || dst_port == s_udp_port_tx[i]) {
+                return true;
+            }
+        }
+    } else {
+        if (s_udp_port_rx[0] == 0) {
+            return true;
+        }
+        for (int i = 0; i < sizeof(s_udp_port_rx) / sizeof(s_udp_port_rx[0]); ++i) {
+            if (src_port == s_udp_port_rx[i] || dst_port == s_udp_port_rx[i]) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 /* only support tcp, udp, icmp now. attention: don't support ip fragment now. */
 void lwip_print_pkt_info(void *buf, bool is_send)
 {
@@ -121,9 +148,11 @@ void lwip_print_pkt_info(void *buf, bool is_send)
         uint16_t src_port = *udp; src_port <<= 8; src_port += *(udp + 1);
         uint16_t dst_port = *(udp + 2); dst_port <<= 8; dst_port += *(udp + 3);
         uint16_t udp_dlen = ip_dlen - 8; /* fixed length: 8 bytes for udp header */
-        if (s_udp_port != 0 && src_port != s_udp_port && dst_port != s_udp_port) {
+
+        if (!udp_accept_print(src_port, dst_port, is_send)) {
             return;
         }
+
         if (is_send) {
             printf("@@ WiFi Tx UDP - IPL:%u, SP:%u, DP:%u, UDL:%u\\n", ip_tlen, src_port, dst_port, udp_dlen);
         } else {
