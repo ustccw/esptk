@@ -23,8 +23,9 @@ ESP_LOGI "git fetch --no-tags --no-recurse-submodules $remote_repo $branch_name.
 git fetch --no-tags --no-recurse-submodules $remote_repo $branch_name > /dev/null 2>&1 \
     || git checkout $branch_name > /dev/null 2>&1 && git branch -D $temp_branch > /dev/null 2>&1 && ESP_LOGE "git fetch failed"
 git branch -D $branch_name > /dev/null 2>&1
+git checkout $branch_name > /dev/null 2>&1
 ESP_LOGI "git merge $remote_repo/$branch_name $branch_name..."
 git merge $remote_repo/$branch_name $branch_name || true
-git checkout $branch_name > /dev/null 2>&1
 git branch -D $temp_branch > /dev/null 2>&1
 ESP_LOGI "Done"
+git log -n 1
