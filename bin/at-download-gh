@@ -10,7 +10,7 @@ source $TK_PATH/bin/esptk-export
 s_download_flag=0
 flash_baud_rate=921600
 oauth_token=""
-github_token_file=~/.github_oauth_token
+github_token_file=~/.esptk/github_oauth_token
 artifact_list_file=at_artifact.list
 
 # According to https://docs.github.com/en/rest/reference/actions
