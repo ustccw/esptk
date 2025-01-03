@@ -37,6 +37,10 @@ def search_function_in_a_files(files, function_name):
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
             if result.returncode == 0:
                 ret.append((file, result.stdout))
+            cmd = 'nm {} | grep {} | grep -E " W "'.format(file, function_name)
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            if result.returncode == 0:
+                ret.append((file, result.stdout))
         except subprocess.CalledProcessError as e:
             ESP_LOGE(f"Error occurred while processing file: {file}, error message: {e.output}")
     return ret
