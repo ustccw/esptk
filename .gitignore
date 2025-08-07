@@ -6,3 +6,6 @@
 
 # VS Code Settings
 .vscode/
+
+# cache dir
+**/__pycache__/
