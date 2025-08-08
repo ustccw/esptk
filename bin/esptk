@@ -6,7 +6,7 @@ TK_PATH=`realpath $0`
 TK_PATH=`echo ${TK_PATH%/bin*}`
 source $TK_PATH/bin/esptk-export
 
-esptk_version=1.2
+esptk_version=1.2.1
 
 cd $TK_PATH
 esptk_git=`git describe --tags --dirty`

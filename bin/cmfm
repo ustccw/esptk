@@ -26,9 +26,9 @@ else
 fi
 
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\r\n  cmfm: $idft -p /dev/ttyUSB* flash monitor\r\n"
-    ESP_LOGN "  cmfm : $idft flash monitor all device"
-    ESP_LOGN "  cmfm [x]: $idft flash monitor one device by index 'x', such as 'cmfm 1' means: $idft -p /dev/ttyUSB1 flash monitor"
+    ESP_LOGB "NAME\r\n  cmfm: $idft -p /dev/ttyUSB* flash and esp-logger.py\r\n"
+    ESP_LOGN "  cmfm : $idft flash and and esp-logger.py all device"
+    ESP_LOGN "  cmfm [x]: $idft flash and and esp-logger.py one device by index 'x', such as 'cmfm 1' means: $idft -p /dev/ttyUSB1 flash and esp-logger.py -p /dev/ttyUSB1"
     exit
 fi
 
@@ -106,22 +106,15 @@ else
     ESP_LOGI "All flash download OK!"
 fi
 
-# idf.py monitor
 function esp_cmm_one_flash()
 {
-    if [ -e "/dev/ttyUSB$1" ]; then
-        ESP_LOGI "$idft -p /dev/ttyUSB$1 monitor"
-        $idft -p /dev/ttyUSB$1 monitor
-    else
-        ESP_LOGW "No /dev/ttyUSB$1 Device!" && exit
-    fi
+    esp-logger.py -p /dev/ttyUSB$1 -s
 }
 
 function esp_cmm_all_flash()
 {
     for sp in /dev/ttyUSB*
-    do
-    {
+    do {
         if [ $sp == "/dev/ttyUSB*" ]; then
             ESP_LOGE "No /dev/ttyUSB* Device!"
             exit
@@ -129,11 +122,9 @@ function esp_cmm_all_flash()
 
         spcounts=`ls -al /dev/ttyUSB* | wc -l`
         if [ $spcounts -eq 1 ]; then
-            ESP_LOGI "$idft -p $sp monitor"
-            $idft -p $sp monitor
+            esp-logger.py -s
         else
-            ESP_LOGI "+$idft -p $sp monitor"
-            gnome-terminal -x bash -c "export IDF_PATH=$IDF_PATH; echo \"$idft -p $sp monitor\"; $idft -p $sp monitor"  
+            gnome-terminal --tab -- bash -c "esp-logger.py -p $sp -s; exec bash"
         fi
     }
     done

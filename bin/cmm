@@ -6,33 +6,17 @@ TK_PATH=`realpath $0`
 TK_PATH=`echo ${TK_PATH%/bin*}`
 source $TK_PATH/bin/esptk-export
 
-WORK_FOLDER=`pwd`
-WORK_FOLDER=`echo ${WORK_FOLDER##*/}`
-
-if [ -f build.py ]; then
-    # just for esp-at project
-    idft=./build.py
-else
-    idft=idf.py
-fi
 
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME\r\n  cmm: $idft -p /dev/ttyUSB* monitor\r\n"
-    ESP_LOGN "  cmm : $idft monitor on all device"
-    ESP_LOGN "  cmm [x]: $idft monitor by index 'x', such as 'cmm 0' means: $idft -p /dev/ttyUSB0 monitor"
+    ESP_LOGB "NAME\r\n  cmm: A simple serial port logger for ESP chips with logging, reset and reconnection capabilities.\r\n"
+    ESP_LOGN "  cmm : esp-logger.py on all device"
+    ESP_LOGN "  cmm [x]: esp-logger.py -p /dev/ttyUSBx"
     exit
 fi
 
-ESP_OBJ_CHECK "CMakeLists.txt"
-
 function esp_cmm_one_flash()
 {
-    if [ -e "/dev/ttyUSB$1" ]; then
-        ESP_LOGI "$idft -p /dev/ttyUSB$1 monitor"
-        $idft -p /dev/ttyUSB$1 monitor
-    else
-        ESP_LOGW "No /dev/ttyUSB$1 Device!" && exit
-    fi
+    esp-logger.py -p /dev/ttyUSB$1 -s
 }
 
 function esp_cmm_all_flash()
@@ -46,11 +30,9 @@ function esp_cmm_all_flash()
 
         spcounts=`ls -al /dev/ttyUSB* | wc -l`
         if [ $spcounts -eq 1 ]; then
-            ESP_LOGI "$idft -p $sp monitor"
-            $idft -p $sp monitor
+            esp-logger.py -s
         else
-            ESP_LOGI "+: $idft -p $sp monitor"
-            gnome-terminal -x bash -c "export IDF_PATH=$IDF_PATH; echo \"$idft -p $sp monitor\"; $idft -p $sp monitor"  
+            gnome-terminal --tab -- bash -c "esp-logger.py -p $sp -s; exec bash"
         fi
     }
     done
