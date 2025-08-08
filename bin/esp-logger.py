@@ -127,7 +127,7 @@ class SerialPortLogger:
     def signal_handler(self, sig, frame) -> None:
         """Handle interrupt signals (Ctrl+C)."""
         self.should_exit = True
-        self.log_info('Ctrl+C pressed, exiting...')
+        self.log_info('\nCtrl+C pressed, exiting...')
 
     @staticmethod
     def validate_serial_port(port: str) -> str:
