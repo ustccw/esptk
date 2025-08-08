@@ -2,17 +2,16 @@
 # chenwu@espressif.com
 set -e
 
-TK_PATH=`realpath $0`
-TK_PATH=`echo ${TK_PATH%/bin*}`
+REPO_PATH="$(dirname "$(dirname "$(realpath "${BASH_SOURCE[0]}")")")"
 
-for sh in $TK_PATH/common/*
+for sh in $REPO_PATH/common/*
 do {
     source $sh
 }
 done
 wait
 
-for component in $TK_PATH/components/*
+for component in $REPO_PATH/components/*
 do {
     export PATH=$component:$PATH
 }
