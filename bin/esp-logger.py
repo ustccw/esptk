@@ -92,7 +92,7 @@ class SerialPortLogger:
         try:
             log_dir = os.path.join(os.getcwd(), 'esp_log')
             self.create_directory(log_dir)
-            filename = datetime.now().strftime('%Y%m%d_%H%M%S.log')
+            filename = datetime.now().strftime('%Y%m%d_%H%M%S_%f.log')
             self.log_file_path = os.path.join(log_dir, filename)
             return open(self.log_file_path, 'w', encoding='utf-8')
         except Exception as e:
