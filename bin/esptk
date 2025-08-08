@@ -6,7 +6,7 @@ TK_PATH=`realpath $0`
 TK_PATH=`echo ${TK_PATH%/bin*}`
 source $TK_PATH/bin/esptk-export
 
-esptk_version=1.2-dev
+esptk_version=1.2
 
 cd $TK_PATH
 esptk_git=`git describe --tags --dirty`
@@ -17,51 +17,67 @@ ESP_LOGN "esptk git: $esptk_git"
 
 function SHOW_FEATURES()
 {
-    ESP_LOGI "------------------------------ esptk v1.1 -----------------------------"
+    ESP_LOGN "esptk:\tesptk version & command list"
 
-    ESP_LOGN "m: make"
-    ESP_LOGN "cm: idf.py build"
-    ESP_LOGN "ef: esptool.py erase_flash"
-    ESP_LOGN "kp: kill the particular port"
-    ESP_LOGN "kt: kill the task by keyword"
-    ESP_LOGN "mf: make flash"
-    ESP_LOGN "mm: make monitor"
-    ESP_LOGN "st: see the task by keyword"
-    ESP_LOGN "sp: see the particular port"
+    ESP_LOGN "esp32c2:\tidf.py set-target esp32c2"
+    ESP_LOGN "esp32c3:\tidf.py set-target esp32c3"
+    ESP_LOGN "esp32c5:\tidf.py set-target esp32c5"
+    ESP_LOGN "esp32c6:\tidf.py set-target esp32c6"
+    ESP_LOGN "esp32s2:\tidf.py set-target esp32s2"
+    ESP_LOGN ""
 
-    ESP_LOGN "cmf: idf.py flash"
-    ESP_LOGN "cmm: idf.py monitor"
-    ESP_LOGN "mmc: make menuconfig"
-    ESP_LOGN "mfm: make flash monitor"
-    ESP_LOGN "idf: prompt IDF_PATH"
+    ESP_LOGN "cm:\tidf.py build"
+    ESP_LOGN "cmf:\tidf.py flash"
+    ESP_LOGN "cmm:\tidf.py monitor"
+    ESP_LOGN "cmmc:\tidf.py menuconfig"
+    ESP_LOGN "cmfm:\tidf.py flash monitor"
+    ESP_LOGN "ef:\tesptool.py erase_flash"
+    ESP_LOGN ""
 
-    ESP_LOGN "cmmc: idf.py menuconfig"
-    ESP_LOGN "cusb: chmod 777 /dev/ttyUSB*"
-    ESP_LOGN "catn: cat the contents of the nth file"
-    ESP_LOGN "cmfm: idf.py flash monitor"
-    ESP_LOGN "eidf: export IDF_PATH script"
-    ESP_LOGN "gbin: generate bin file"
-    ESP_LOGN "susb: see the /dev/ttyUSB* device"
-    ESP_LOGN "gccv: see the compiler version of toolchain"
+    ESP_LOGN "gitcc:\tgit resposity clean"
+    ESP_LOGN "fpull:\tgit pull by force"
+    ESP_LOGN "fpush:\tgit push by force"
+    ESP_LOGN "frebase:\tgit (rebase & push) by force"
+    ESP_LOGN "fsubmit:\tgit (add & commit & rebase & push) by force"
+    ESP_LOGN "hexdump2bin:\tConvert the hexdump stream or txt file into binary file"
+    ESP_LOGN ""
 
-    ESP_LOGN "esptk: esptk version & changelog"
-    ESP_LOGN "gitcc: git resposity clean"
+    ESP_LOGN "esp-logger.py:\tA simple serial port logger for ESP chips with logging, reset and reconnection capabilities."
+    ESP_LOGN "lookup-func.py:\tFind out the symbols in the binary file"
+    ESP_LOGN "esp-dump.py:\tDump the symbols from the elf file"
+    ESP_LOGN "scheduler.py:\tDo the scheduling for the python scripts"
+    ESP_LOGN "esp-combine-bin.py:\tCombine multiple bins into one"
+    ESP_LOGN ""
 
-    ESP_LOGN "esp32s2: idf.py set-target esp32s2"
-    ESP_LOGN "hexdump2bin: convert the hexdump stream or txt file into binary file"
-    ESP_LOGN "esp-combine-bin.py: combine multi bins into one"
-    ESP_LOGN "fpull: git pull by force"
-    ESP_LOGN "fpush: git push by force"
-    ESP_LOGN "frebase: git (rebase & push) by force"
-    ESP_LOGN "fsubmit: git (add & commit & rebase & push) by force"
-    ESP_LOGN "aircap: capture the air packets"
-    ESP_LOGN "at-download-gh: download the latest esp-at firmware from github and burn into chip"
-    ESP_LOGN "at-download-gl: download the esp-at firmware from gitlab and burn into chip"
-    ESP_LOGN "at-download-local: unzip the artifacts and burn into chip"
-    ESP_LOGN "at-released: download the released esp-at firmware"
-    ESP_LOGN "check-doc-chars.py: check document characters"
-    ESP_LOGN "esp32c3: idf.py set-target esp32c3"
-    ESP_LOGI "-----------------------------------------------------------------------"
+    ESP_LOGN "at-download-gh:\tDownload the latest esp-at firmware from github and burn into chip"
+    ESP_LOGN "at-download-gl:\tDownload the esp-at firmware from gitlab and burn into chip"
+    ESP_LOGN "at-released:\tDownload the released esp-at firmware"
+    ESP_LOGN "at-download-local:\tUnzip the artifacts and burn into chip"
+    ESP_LOGN ""
+
+    ESP_LOGN "kp:\tKill the particular port"
+    ESP_LOGN "kt:\tKill the task by keyword"
+    ESP_LOGN "st:\tSee the task by keyword"
+    ESP_LOGN "sp:\tSee the particular port"
+    ESP_LOGN "cp-img:\tCopy the image file to the clipboard"
+    ESP_LOGN "cusb:\tchmod 777 /dev/ttyUSB*"
+    ESP_LOGN "susb:\tSee the /dev/ttyUSB* device"
+    ESP_LOGN "catn:\tCat the contents of the nth file"
+    ESP_LOGN "gbin:\tGenerate a random/special bin file"
+    ESP_LOGN "aircap:\tCapture the air packets"
+    ESP_LOGN "gccv:\tSee the compiler version of toolchain"
+    ESP_LOGN "pmk.py:\tCalculate the pmk value for the given Wi-Fi ssid and password"
+    ESP_LOGN ""
+
+    ESP_LOGN "m:\tmake"
+    ESP_LOGN "mf:\tmake flash"
+    ESP_LOGN "mm:\tmake monitor"
+    ESP_LOGN "mmc:\tmake menuconfig"
+    ESP_LOGN "mfm:\tmake flash monitor"
+    ESP_LOGN "idf:\tPrompt IDF_PATH"
+    ESP_LOGN "eidf:\texport IDF_PATH script"
+
+    # ESP_LOGI "-----------------------------------------------------------------------"
 }
 
 function SHOW_ONGOING()
@@ -80,13 +96,8 @@ function SHOW_CHANGELOG()
     ESP_LOGN "*******************************************************************************"
     ESP_LOGI " esptk: provide a set of cute kits for linux, specially for espressif platform"
     ESP_LOGN "*******************************************************************************"
-    ESP_LOGB "CHANGE LOG:"
-    
+
     SHOW_FEATURES
-
-    SHOW_ONGOING
-
-    SHOW_PLAN
 }
 
 # ChangeLog

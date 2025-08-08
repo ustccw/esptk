@@ -7,28 +7,33 @@ Current primary maintainer is ustccw (@[ustccw](https://github.com/ustccw/)).
 
 esptk is Free Software under a MIT license.
 
-# Development Mode Installation
+# Installation
 
-Development mode allows you to run the latest development version from this repository.
-
-### Temporary installation to shell terminal
-```sh
-git clone https://github.com/ustccw/esptk.git
-cd esptk
-git submodule update --init --recursive
-export PATH=./bin/:$PATH
+```
+source install.sh
 ```
 
-### Permanent installation to shell terminal
-```sh
-git clone https://github.com/ustccw/esptk.git
-cd esptk
-git submodule update --init --recursive
-TK_PATH=`realpath ./bin`
-echo "# add by esptk" >> ~/.bashrc
-echo "export PATH=$TK_PATH:\$PATH" >> ~/.bashrc
-echo "" >> ~/.bashrc
+# Environment Setup
+
+After installation, add `esptk/bin` to your PATH permanently by adding the following line to your shell configuration file:
+
+**For Bash users (~/.bashrc):**
+```bash
+echo 'export PATH=/path/to/esptk/bin:$PATH' >> ~/.bashrc
 source ~/.bashrc
+```
+
+**For Zsh users (~/.zshrc):**
+```bash
+echo 'export PATH=/path/to/esptk/bin:$PATH' >> ~/.zshrc
+source ~/.zshrc
+```
+
+**Note:** Replace `/path/to/esptk` with the actual path to your esptk installation directory.
+
+Alternatively, you can add the PATH manually in each terminal session:
+```bash
+export PATH=/path/to/esptk/bin:$PATH
 ```
 
 # Usage
@@ -38,7 +43,3 @@ Use `esptk -h` to see a summary of all available commands and command brief intr
 
 To see all options for a particular command, append `-h` to the command name.  
 such as `ef -h`.
-
-# Troubleshoot & Feature request
-Please raise a [issue](https://github.com/ustccw/esptk/issues) if any question.  
-Any [Pull request](https://github.com/ustccw/esptk/pulls) is welcomed if you have a good idea.  
