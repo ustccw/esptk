@@ -193,8 +193,13 @@ class SerialPortLogger:
             while not self.should_exit:
                 try:
                     if self.serial_handle and self.serial_handle.in_waiting > 0:
+                        # TODO: Implement a more robust reading mechanism
+                        # There is a potential risk of blocking here if the serial port data does not contain a newline but is continuous (e.g., wrong baud rate)
                         data = self.serial_handle.readline().decode('utf-8', 'ignore')
+                        # data = self.serial_handle.read(self.serial_handle.in_waiting).decode('utf-8', 'ignore')
                         self.log_raw(data)
+                    else:
+                        time.sleep(0.001)
                 except Exception as e:
                     self.log_error(f'Failed to read data from {args.port}: {e}')
                     try:
