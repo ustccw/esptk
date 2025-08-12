@@ -17,7 +17,7 @@ if [ $# -ne 1 ]; then
     ESP_LOGE "unsupported parameter counts:$#, expected see 1"
 fi
 
-if test -z "$(ps -aux | grep $1 | grep -v grep | grep -v esptk)"; then
+if test -z "$(ps -aux | grep $1 | grep -v grep)"; then
     ESP_LOGW "No a task/process include keyword: $1"
     exit
 else
