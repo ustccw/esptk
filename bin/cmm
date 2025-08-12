@@ -16,7 +16,7 @@ fi
 
 function esp_cmm_one_flash()
 {
-    esp-logger.py -p /dev/ttyUSB$1 -s
+    esp-logger.py -p /dev/ttyUSB$1
 }
 
 function esp_cmm_all_flash()
@@ -30,7 +30,7 @@ function esp_cmm_all_flash()
 
         spcounts=`ls -al /dev/ttyUSB* | wc -l`
         if [ $spcounts -eq 1 ]; then
-            esp-logger.py -s
+            esp-logger.py
         else
             gnome-terminal --tab -- bash -c "esp-logger.py -p $sp -s; exec bash"
         fi
