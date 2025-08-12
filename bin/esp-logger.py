@@ -50,7 +50,15 @@ class SerialPortLogger:
     def log_raw(self, message: str) -> None:
         """Log a raw message without newline."""
         formatted_msg = self._format_message(message)
-        print(formatted_msg, end='')
+        if message.startswith('I '):
+            formatted_msg_with_color = f'\033[32m{formatted_msg}\033[0m'
+        elif message.startswith('W '):
+            formatted_msg_with_color = f'\033[33m{formatted_msg}\033[0m'
+        elif message.startswith('E '):
+            formatted_msg_with_color = f'\033[31m{formatted_msg}\033[0m'
+        else:
+            formatted_msg_with_color = formatted_msg
+        print(formatted_msg_with_color, end='')
         self._write_to_file(formatted_msg, add_newline=False)
 
     def _format_message(self, message: str) -> str:
