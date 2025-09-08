@@ -86,6 +86,7 @@ class SerialPortLogger:
             ports = [p for p in ports if 'tty.usbserial' in p.device]
         elif system == 'windows':
             ports = [p for p in ports if 'COM' in p.device]
+        ports.sort(key=lambda p: p.device)
         return ports[0].device if ports else None
 
     @staticmethod
