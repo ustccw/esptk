@@ -99,7 +99,7 @@ class SerialPortLogger:
     def create_log_file(self) -> TextIO:
         """Create and open a log file for writing."""
         try:
-            log_dir = os.path.join(os.getcwd(), 'esp_log')
+            log_dir = os.path.join(os.getcwd(), 'esp_logs')
             self.create_directory(log_dir)
             filename = datetime.now().strftime('%Y%m%d_%H%M%S_%f.log')
             self.log_file_path = os.path.join(log_dir, filename)
