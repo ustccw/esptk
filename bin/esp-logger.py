@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # chenwu@espressif.com
 """
@@ -10,6 +10,8 @@ A simple serial port logger for ESP chips with logging, reset and reconnection c
 import argparse
 import os
 import platform
+import re
+import select
 import signal
 import sys
 import time
@@ -18,6 +20,39 @@ from typing import Optional, TextIO
 
 import serial
 import serial.tools.list_ports
+
+try:
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None
+
+try:
+    import termios
+    import tty
+except ImportError:  # Windows
+    termios = None
+    tty = None
+
+try:
+    import msvcrt
+except ImportError:
+    msvcrt = None
+
+# ESP-IDF style levels: I/W/E/D/V/A/F, optionally preceded by CR from terminal.
+_LOG_LEVEL_RE = re.compile(r'^[\r]*([IWEADVF]) ')
+_LEVEL_COLORS = {
+    'I': '32',  # green
+    'W': '33',  # yellow
+    'E': '31',  # red
+    'D': '36',  # cyan
+    'V': '37',  # white/default bright
+    'A': '35',  # magenta
+    'F': '31',  # red (fatal)
+}
+
+# Interactive hotkey: same reset sequence as the initial auto-reboot.
+CTRL_R = '\x12'
+
 
 class SerialPortLogger:
     """A serial port logger for ESP chips."""
@@ -28,37 +63,64 @@ class SerialPortLogger:
         self.serial_handle: Optional[serial.Serial] = None
         self.should_exit: bool = False
         self.log_file_path: Optional[str] = None
+        self._port_locked: bool = False
+        self._stdin_old_attrs = None
+
+    @staticmethod
+    def color_enabled(stream) -> bool:
+        """Whether ANSI colors should be used for the given stream.
+
+        Honors NO_COLOR / FORCE_COLOR (https://no-color.org/) and TTY detection.
+        """
+        if os.environ.get('NO_COLOR'):
+            return False
+        if os.environ.get('FORCE_COLOR'):
+            return True
+        try:
+            return stream.isatty()
+        except Exception:
+            return False
+
+    @staticmethod
+    def colorize(message: str, color_code: str, stream=sys.stdout) -> str:
+        """Wrap message with ANSI color if enabled for stream."""
+        if SerialPortLogger.color_enabled(stream):
+            return f'\033[{color_code}m{message}\033[0m'
+        return message
+
+    @staticmethod
+    def colorize_esp_log_line(message: str, formatted_msg: str, stream=sys.stdout) -> str:
+        """Color a line based on ESP-IDF log level prefix in the raw serial text."""
+        match = _LOG_LEVEL_RE.match(message)
+        if not match:
+            return formatted_msg
+        color_code = _LEVEL_COLORS.get(match.group(1))
+        if not color_code:
+            return formatted_msg
+        return SerialPortLogger.colorize(formatted_msg, color_code, stream)
 
     def log_info(self, message: str) -> None:
         """Log an info message in green color."""
         formatted_msg = self._format_message(message)
-        print(f'\033[32m{formatted_msg}\033[0m')
+        print(self.colorize(formatted_msg, '32'))
         self._write_to_file(formatted_msg)
 
     def log_error(self, message: str) -> None:
         """Log an error message in red color."""
         formatted_msg = self._format_message(message)
-        sys.stderr.write(f'\033[31m{formatted_msg}\n\033[0m')
+        sys.stderr.write(self.colorize(f'{formatted_msg}\n', '31', sys.stderr))
         self._write_to_file(formatted_msg)
 
     def log_warn(self, message: str) -> None:
-        """Log an warning message in yellow color."""
+        """Log a warning message in yellow color."""
         formatted_msg = self._format_message(message)
-        print(f'\033[33m{formatted_msg}\033[0m')
+        print(self.colorize(formatted_msg, '33'))
         self._write_to_file(formatted_msg)
 
     def log_raw(self, message: str) -> None:
         """Log a raw message without newline."""
         formatted_msg = self._format_message(message)
-        if message.startswith('I '):
-            formatted_msg_with_color = f'\033[32m{formatted_msg}\033[0m'
-        elif message.startswith('W '):
-            formatted_msg_with_color = f'\033[33m{formatted_msg}\033[0m'
-        elif message.startswith('E '):
-            formatted_msg_with_color = f'\033[31m{formatted_msg}\033[0m'
-        else:
-            formatted_msg_with_color = formatted_msg
-        print(formatted_msg_with_color, end='')
+        print(self.colorize_esp_log_line(message, formatted_msg), end='')
         self._write_to_file(formatted_msg, add_newline=False)
 
     def _format_message(self, message: str) -> str:
@@ -72,6 +134,20 @@ class SerialPortLogger:
         if self.log_file_handle:
             suffix = '\n' if add_newline else ''
             self.log_file_handle.write(f'{message}{suffix}')
+            self.log_file_handle.flush()
+
+    @staticmethod
+    def is_candidate_port(device: str, system: Optional[str] = None) -> bool:
+        """Return True if device name looks like an ESP-usable serial port on this OS."""
+        system = (system or platform.system()).lower()
+        if system == 'linux':
+            return 'ttyUSB' in device or 'ttyACM' in device
+        if system == 'darwin':
+            return 'tty.usbserial' in device or 'tty.usbmodem' in device
+        if system == 'windows':
+            # pyserial reports COMx; accept COM / com
+            return device.upper().startswith('COM')
+        return False
 
     @staticmethod
     def find_first_available_port() -> Optional[str]:
@@ -80,21 +156,15 @@ class SerialPortLogger:
         if not ports:
             return None
         system = platform.system().lower()
-        if system == 'linux':
-            ports = [p for p in ports if 'ttyUSB' in p.device]
-        elif system == 'darwin':
-            ports = [p for p in ports if 'tty.usbserial' in p.device]
-        elif system == 'windows':
-            ports = [p for p in ports if 'COM' in p.device]
+        ports = [p for p in ports if SerialPortLogger.is_candidate_port(p.device, system)]
         ports.sort(key=lambda p: p.device)
         return ports[0].device if ports else None
 
     @staticmethod
     def create_directory(path: str) -> None:
         """Create directory if it doesn't exist."""
-        path = path.strip().rstrip('\\')
-        if not os.path.exists(path):
-            os.makedirs(path)
+        path = path.strip().rstrip('\\/')
+        os.makedirs(path, exist_ok=True)
 
     def create_log_file(self) -> TextIO:
         """Create and open a log file for writing."""
@@ -107,8 +177,76 @@ class SerialPortLogger:
         except Exception as e:
             raise RuntimeError(f'Failed to create log file: {e}') from e
 
+    def _lock_serial_port(self) -> None:
+        """Try to take an exclusive advisory lock (Unix flock). No-op on Windows."""
+        if fcntl is None or self.serial_handle is None:
+            return
+        try:
+            fcntl.flock(self.serial_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self._port_locked = True
+        except (BlockingIOError, OSError) as e:
+            raise RuntimeError('Serial port is locked by another process') from e
+
+    def _unlock_serial_port(self) -> None:
+        """Release advisory lock if held."""
+        if not self._port_locked or fcntl is None or self.serial_handle is None:
+            self._port_locked = False
+            return
+        try:
+            fcntl.flock(self.serial_handle.fileno(), fcntl.LOCK_UN)
+        except Exception:
+            pass
+        self._port_locked = False
+
+    def _enable_hotkeys(self) -> None:
+        """Put stdin into cbreak mode so Ctrl+R is readable without Enter (Unix TTY)."""
+        self._stdin_old_attrs = None
+        if not sys.stdin.isatty() or termios is None or tty is None:
+            return
+        try:
+            fd = sys.stdin.fileno()
+            self._stdin_old_attrs = termios.tcgetattr(fd)
+            tty.setcbreak(fd)
+        except Exception:
+            self._stdin_old_attrs = None
+
+    def _disable_hotkeys(self) -> None:
+        """Restore stdin terminal attributes if we changed them."""
+        if self._stdin_old_attrs is None or termios is None:
+            return
+        try:
+            termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, self._stdin_old_attrs)
+        except Exception:
+            pass
+        self._stdin_old_attrs = None
+
+    def _read_hotkey_char(self) -> Optional[str]:
+        """Non-blocking read of one stdin character, or None if nothing pending."""
+        if not sys.stdin.isatty():
+            return None
+        try:
+            if msvcrt is not None and platform.system().lower() == 'windows':
+                if not msvcrt.kbhit():
+                    return None
+                ch = msvcrt.getch()
+                return ch.decode('latin1') if isinstance(ch, bytes) else ch
+            ready, _, _ = select.select([sys.stdin], [], [], 0)
+            if not ready:
+                return None
+            return sys.stdin.read(1)
+        except Exception:
+            return None
+
+    def _poll_hotkeys(self) -> None:
+        """Handle interactive hotkeys (Ctrl+R -> reset chip)."""
+        ch = self._read_hotkey_char()
+        if ch == CTRL_R:
+            self.log_info('Ctrl+R pressed, resetting ESP chip...')
+            self.reset_esp_chip()
+
     def cleanup_and_exit(self) -> None:
         """Clean up resources and exit gracefully."""
+        self._disable_hotkeys()
         if self.serial_handle:
             try:
                 # Read out remaining data before closing
@@ -117,6 +255,7 @@ class SerialPortLogger:
                     self.log_raw(data)
             except Exception:
                 pass
+            self._unlock_serial_port()
             try:
                 self.serial_handle.close()
             except Exception:
@@ -130,7 +269,8 @@ class SerialPortLogger:
             except Exception:
                 pass
             if self.log_file_path:
-                print(f'\n\033[1;32mLog saved to: {self.log_file_path}\033[0m')
+                saved = f'Log saved to: {self.log_file_path}'
+                print(f'\n{self.colorize(saved, "1;32")}')
             self.log_file_handle = None
 
     def signal_handler(self, sig, frame) -> None:
@@ -139,21 +279,27 @@ class SerialPortLogger:
         self.log_info('\nCtrl+C pressed, exiting...')
 
     @staticmethod
-    def validate_serial_port(port: str) -> str:
-        """Validate if the serial port is available and accessible."""
-        if port is None:
-            raise argparse.ArgumentTypeError('No available serial port found')
-        if not os.path.exists(port):
-            raise argparse.ArgumentTypeError(f"Serial port '{port}' does not exist")
+    def validate_serial_port(port: Optional[str]) -> str:
+        """Validate that the serial port exists (non-Windows) and can be opened.
+
+        On Windows, COM ports are not filesystem paths, so os.path.exists is skipped.
+        """
+        if not port:
+            raise ValueError('No available serial port found')
+        if platform.system().lower() != 'windows' and not os.path.exists(port):
+            raise ValueError(f"Serial port '{port}' does not exist")
         try:
             with serial.Serial(port) as _:
                 pass
         except Exception as e:
-            raise argparse.ArgumentTypeError(f"Cannot access serial port '{port}': {e}")
+            raise ValueError(f"Cannot access serial port '{port}': {e}") from e
         return port
 
     def reset_esp_chip(self) -> None:
         """Reset the ESP chip using DTR and RTS signals."""
+        if not self.serial_handle or not self.serial_handle.is_open:
+            self.log_warn('Cannot reset: serial port is not open')
+            return
         self.serial_handle.dtr = False
         self.serial_handle.rts = True
         time.sleep(0.1)
@@ -169,20 +315,33 @@ class SerialPortLogger:
 
         # Set up signal handler
         signal.signal(signal.SIGINT, self.signal_handler)
+        self._enable_hotkeys()
+        self.log_info('Hotkey: Ctrl+R resets the ESP chip')
 
         has_reset = False
         first_reconnect = True
+        reconnect_delay = 0.5
         while not self.should_exit:
             try:
-                # TODO: Implement serial port locking mechanism to avoid conflicts
-                self.serial_handle = serial.Serial(args.port, args.baudrate, timeout=1, rtscts=args.flow_control)
+                self.serial_handle = serial.Serial(
+                    args.port, args.baudrate, timeout=0.2, rtscts=args.flow_control
+                )
+                self._lock_serial_port()
             except Exception as e:
                 if first_reconnect:
-                    self.log_warn(f'Failed to open {args.port}. Reconnecting...')
+                    self.log_warn(f'Failed to open {args.port}: {e}. Reconnecting...')
                 first_reconnect = False
-                time.sleep(0.001)
+                if self.serial_handle:
+                    try:
+                        self.serial_handle.close()
+                    except Exception:
+                        pass
+                    self.serial_handle = None
+                time.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 2, 2.0)
                 continue
             first_reconnect = True
+            reconnect_delay = 0.5
             self.log_info(f'Opened {args.port} with baudrate {args.baudrate}')
 
             # Reset ESP chip if requested at the start
@@ -190,19 +349,17 @@ class SerialPortLogger:
                 self.reset_esp_chip()
                 has_reset = True
 
-            # Main data reading loop
+            # Block on readline so each line keeps color heuristics intact.
+            # timeout=0.2 lets Ctrl+C / Ctrl+R / should_exit be checked without busy-waiting.
             while not self.should_exit:
                 try:
-                    if self.serial_handle and self.serial_handle.in_waiting > 0:
-                        # TODO: Implement a more robust reading mechanism
-                        # There is a potential risk of blocking here if the serial port data does not contain a newline but is continuous (e.g., wrong baud rate)
-                        data = self.serial_handle.readline().decode('utf-8', 'ignore')
-                        # data = self.serial_handle.read(self.serial_handle.in_waiting).decode('utf-8', 'ignore')
-                        self.log_raw(data)
-                    else:
-                        time.sleep(0.001)
+                    raw = self.serial_handle.readline()
+                    if raw:
+                        self.log_raw(raw.decode('utf-8', 'ignore'))
+                    self._poll_hotkeys()
                 except Exception as e:
                     self.log_error(f'Failed to read data from {args.port}: {e}')
+                    self._unlock_serial_port()
                     try:
                         self.serial_handle.close()
                     except Exception:
@@ -211,66 +368,57 @@ class SerialPortLogger:
                     break
         self.cleanup_and_exit()
 
+
 def create_argument_parser() -> argparse.ArgumentParser:
     """Create and configure the command line argument parser."""
-    parser = argparse.ArgumentParser(description='ESP Serial Port Logger')
-    logger = SerialPortLogger()
+    parser = argparse.ArgumentParser(
+        description='ESP Serial Port Logger',
+        epilog='While running, press Ctrl+R to reset the ESP chip (same as initial reboot).',
+    )
     parser.add_argument(
         '--port', '-p',
-        type=logger.validate_serial_port,
-        default=logger.find_first_available_port(),
-        help='Serial port device. Default: the first available port.'
+        default=None,
+        help='Serial port device. Default: the first available port.',
     )
     parser.add_argument(
         '--baudrate', '-b',
         type=int,
         default=115200,
-        help='Serial port baud rate. Default: 115200.'
+        help='Serial port baud rate. Default: 115200.',
     )
     parser.add_argument(
         '--flow-control', '-fc',
         action='store_true',
-        help='Enable hardware flow control. Default: False.'
+        help='Enable hardware flow control. Default: False.',
     )
     parser.add_argument(
         '--save-log', '-s',
         action='store_true',
-        help='Save logs to local files. Default: False.'
+        help='Save logs to local files. Default: False.',
     )
     parser.add_argument(
         '--no-timestamp', '-nt',
         action='store_true',
-        help='Disable timestamp in log output. Default: False.'
+        help='Disable timestamp in log output. Default: False.',
     )
     parser.add_argument(
         '--no-reboot-chip', '-nr',
         action='store_true',
-        help='Skip ESP chip reboot before logging. Default: False.'
+        help='Skip ESP chip reboot before logging. Default: False.',
     )
-    # TODO: Implement log rotation options
-    # parser.add_argument(
-    #     '--save-log-rotate-interval',
-    #     type=int,
-    #     default=None,
-    #     help='Rotate log file every N minutes. Default: None (no rotation).'
-    # )
-    # parser.add_argument(
-    #     '--save-log-max-size',
-    #     type=int,
-    #     default=None,
-    #     help='Rotate log file when size exceeds N MB. Default: None (no size limit).'
-    # )
+    # TODO: log rotation options (--save-log-rotate-interval / --save-log-max-size)
     return parser
+
 
 def main():
     parser = create_argument_parser()
     args = parser.parse_args()
 
-    # Validate the serial port
     logger = SerialPortLogger()
+    port = args.port or SerialPortLogger.find_first_available_port()
     try:
-        logger.validate_serial_port(args.port)
-    except argparse.ArgumentTypeError as e:
+        args.port = SerialPortLogger.validate_serial_port(port)
+    except ValueError as e:
         logger.log_error(str(e))
         sys.exit(1)
 
@@ -280,6 +428,7 @@ def main():
         logger.log_error(f'A fatal error occurred: {e}')
         logger.cleanup_and_exit()
         sys.exit(1)
+
 
 if __name__ == '__main__':
     main()
