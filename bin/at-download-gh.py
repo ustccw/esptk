@@ -648,14 +648,29 @@ def extract_factory_bin(zip_bytes: bytes) -> tuple[str, bytes]:
 # Save / flash
 # ---------------------------------------------------------------------------
 
+def _safe_keyword(keyword: str) -> str:
+    """Keep filesystem-friendly characters; collapse other runs to '_'."""
+    cleaned = re.sub(r"[^\w.+-]+", "_", keyword.strip(), flags=re.ASCII)
+    cleaned = cleaned.strip("._-")
+    if not cleaned:
+        _die(f"Invalid --keyword value: {keyword!r} (empty after sanitizing)")
+    return cleaned
+
+
 def save_to_disk(
     zip_bytes: bytes,
     member: str,
     artifact_name: str,
     artifact_id: int,
+    keyword: str | None = None,
 ) -> Path:
-    dst_dir = Path(f"{artifact_name}_{artifact_id}")
-    dst_zip = Path(f"{artifact_name}_{artifact_id}.zip")
+    # Original: {artifact_name}_{artifact_id}; with -k: insert keyword before id.
+    if keyword:
+        base = f"{artifact_name}_{_safe_keyword(keyword)}_{artifact_id}"
+    else:
+        base = f"{artifact_name}_{artifact_id}"
+    dst_dir = Path(base)
+    dst_zip = Path(f"{base}.zip")
     if dst_dir.exists():
         shutil.rmtree(dst_dir)
     if dst_zip.exists():
@@ -871,6 +886,13 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Actions run URL or id, e.g. https://github.com/{REPO}/actions/runs/<id>",
     )
     p.add_argument(
+        "-k", "--keyword", metavar="KEYWORD",
+        help=(
+            "Optional tag inserted into the saved zip name "
+            "({artifact}_{keyword}_{id}.zip)"
+        ),
+    )
+    p.add_argument(
         "-t", "--token-file", metavar="PATH",
         help="GitHub token file (overrides default search paths)",
     )
@@ -933,7 +955,7 @@ def main(argv: list[str] | None = None) -> int:
         flash_from_memory(port, args.baud, bin_data, member)
         return 0
 
-    bin_path = save_to_disk(zip_bytes, member, name, art_id)
+    bin_path = save_to_disk(zip_bytes, member, name, art_id, keyword=args.keyword)
     if port:
         flash_from_path(port, args.baud, bin_path)
     else:
