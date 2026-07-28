@@ -1,26 +1,28 @@
 #!/usr/bin/env python3
 """
-Download esp-at firmware from GitHub Actions and optionally flash a device.
+Download esp-at firmware from GitLab CI (pipeline/job artifacts) and optionally
+flash a device.
 
 Standalone (Python 3 stdlib only). Flashing needs esptool / esptool.py on PATH.
 
 Prerequisites:
-  1. GitHub PAT (repo + workflow). File: ~/.esptk/github_oauth_token
-     (or ~/.github_oauth_token), or env GITHUB_TOKEN / GH_TOKEN.
-     Fine-grained tokens: lifetime <= 366 days (espressif org policy).
+  1. GitLab PAT (scopes: api, read_user, read_api). File:
+     ~/.esptk/gitlab_oauth_token (or ~/.gitlab_oauth_token), or env GITLAB_TOKEN.
   2. For flashing: pip install esptool (or esptool.py on PATH).
 
 Examples:
-  at-download-gh.py
-      Interactive: pick a module from the latest master build, save firmware to disk.
-  at-download-gh.py -p /dev/ttyUSB0
+  at-download-gl.py
+      Interactive: pick a job from the latest master pipeline, save firmware.
+  at-download-gl.py -p /dev/ttyUSB0
       Download from master, then flash to the given serial port.
-  at-download-gh.py -p 0 -m
+  at-download-gl.py -p 0 -m
       Same as above (port /dev/ttyUSB0), but keep zip/bin in memory only.
-  at-download-gh.py -B release/v2.3.0.0_esp8266
-      Use the latest successful build on another branch instead of master.
-  at-download-gh.py -u https://github.com/espressif/esp-at/actions/runs/28586915579
-      Download from a specific GitHub Actions run URL (skip branch lookup).
+  at-download-gl.py -B release/v2.3.0.0_esp8266
+      Use the latest successful pipeline on another branch instead of master.
+  at-download-gl.py -u https://gitlab.espressif.cn:6688/application/esp-at/-/pipelines/352799
+      Download from a specific pipeline URL (interactive job pick).
+  at-download-gl.py -u https://gitlab.espressif.cn:6688/application/esp-at/-/jobs/14643605
+      Download artifacts from a specific job URL (skip job pick).
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ import json
 import os
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -40,27 +43,35 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
+from datetime import datetime
 from pathlib import Path
 from typing import Any, NoReturn
 
-REPO = "espressif/esp-at"
-API_BASE = f"https://api.github.com/repos/{REPO}"
+GITLAB_BASE = "https://gitlab.espressif.cn:6688"
+PROJECT_ID = 234
+PROJECT_PATH = "application/esp-at"
+API_BASE = f"{GITLAB_BASE}/api/v4/projects/{PROJECT_ID}"
+JOB_WEB_PREFIX = f"{GITLAB_BASE}/{PROJECT_PATH}/-/jobs"
+PIPELINE_WEB_PREFIX = f"{GITLAB_BASE}/{PROJECT_PATH}/-/pipelines"
 DEFAULT_BRANCH = "master"
 DEFAULT_BAUD = 921600
 DEFAULT_TOKEN_FILES = (
-    "~/.esptk/github_oauth_token",
-    "~/.github_oauth_token",
+    "~/.esptk/gitlab_oauth_token",
+    "~/.gitlab_oauth_token",
 )
-GITHUB_ACCEPT = "application/vnd.github+json"
-GITHUB_API_VERSION = "2022-11-28"
-USER_AGENT = "at-download-gh"
-AT_BUILD_WORKFLOW = "Build ESP-AT Project"
+USER_AGENT = "at-download-gl"
 CHUNK_SIZE = 1024 * 1024
 PROGRESS_WIDTH = 30
 
-MERGE_BRANCH_RE = re.compile(r"^Merge branch .+ into .+", re.IGNORECASE)
-RUN_URL_RE = re.compile(
-    r"^https?://github\.com/([^/]+)/([^/]+)/actions/runs/(\d+)/?(?:[?#].*)?$",
+# Internal GitLab often uses a cert curl treated with --insecure.
+_SSL_CTX = ssl._create_unverified_context()
+
+PIPELINE_URL_RE = re.compile(
+    r"^https?://[^/]+/.+/-/pipelines/(\d+)/?(?:[?#].*)?$",
+    re.IGNORECASE,
+)
+JOB_URL_RE = re.compile(
+    r"^https?://[^/]+/.+/-/jobs/(\d+)/?(?:[?#].*)?$",
     re.IGNORECASE,
 )
 
@@ -113,10 +124,9 @@ def _interrupted() -> NoReturn:
 
 def load_token(token_file: str | None) -> tuple[str, str]:
     """Return (token, source_description)."""
-    for env_name in ("GITHUB_TOKEN", "GH_TOKEN"):
-        env = os.environ.get(env_name, "").strip()
-        if env:
-            return env, f"env:{env_name}"
+    env = os.environ.get("GITLAB_TOKEN", "").strip()
+    if env:
+        return env, "env:GITLAB_TOKEN"
 
     candidates = ([token_file] if token_file else []) + list(DEFAULT_TOKEN_FILES)
     for raw in candidates:
@@ -134,70 +144,37 @@ def load_token(token_file: str | None) -> tuple[str, str]:
         _die(f"Token file {path} has no non-empty token line.")
 
     _die(
-        "No GitHub token found. Set GITHUB_TOKEN / GH_TOKEN, or create "
-        f"{DEFAULT_TOKEN_FILES[0]} (PAT with repo + workflow scopes). See --help."
+        "No GitLab token found. Set GITLAB_TOKEN, or create "
+        f"{DEFAULT_TOKEN_FILES[0]} (PAT with api + read_api scopes). See --help."
     )
 
 
-def describe_token_shape(token: str) -> str:
-    if token.startswith("github_pat_"):
-        return "fine-grained PAT"
-    if token.startswith("ghp_"):
-        return "classic PAT"
-    if token.startswith(("gho_", "ghu_", "ghs_")):
-        return "GitHub OAuth/App token"
-    if len(token) == 40 and all(c in "0123456789abcdefABCDEF" for c in token):
-        return "legacy classic PAT (40-hex)"
-    return "unknown token format"
-
-
-def format_github_api_error(status: int, body: str, url: str) -> str:
+def format_gitlab_api_error(status: int, body: str, url: str) -> str:
     text = body.strip()
-    lower = text.lower()
     message = ""
     try:
         data = json.loads(text)
         if isinstance(data, dict):
-            message = str(data.get("message") or "")
+            message = str(data.get("message") or data.get("error") or "")
+            if not message and "error_description" in data:
+                message = str(data["error_description"])
     except json.JSONDecodeError:
         message = text[:500]
     detail = message or text[:300]
 
     if status == 401:
         return (
-            "GitHub authentication failed (HTTP 401).\n"
+            "GitLab authentication failed (HTTP 401).\n"
             "  Token is missing, expired, revoked, or malformed.\n"
-            "  Create a PAT: https://github.com/settings/tokens\n"
-            "  Classic: scopes 'repo' + 'workflow'. "
-            "Fine-grained: lifetime <= 366 days for espressif.\n"
+            f"  Create a PAT: {GITLAB_BASE}/-/user_settings/personal_access_tokens\n"
+            "  Scopes: api, read_user, read_api.\n"
             f"  Detail: {detail}"
         )
     if status == 403:
-        if "fine-grained" in lower and ("366" in lower or "lifetime" in lower):
-            hint = ""
-            for part in message.replace(",", " ").split():
-                if part.startswith("https://github.com/settings/personal-access-tokens/"):
-                    hint = part.rstrip(".'\"")
-                    break
-            lines = [
-                "GitHub rejected this fine-grained PAT (HTTP 403):",
-                "  espressif forbids fine-grained tokens with lifetime > 366 days.",
-                "  Fix: Expiration <= 366 days, or use a classic PAT.",
-                f"  Token settings: {hint or 'https://github.com/settings/personal-access-tokens'}",
-            ]
-            if message:
-                lines.append(f"  Detail: {message}")
-            return "\n".join(lines)
-        if "sso" in lower or "saml" in lower:
-            return (
-                "GitHub SSO authorization required (HTTP 403).\n"
-                "  Authorize this PAT for the espressif organization, then retry.\n"
-                f"  Detail: {detail}"
-            )
-        if "rate limit" in lower:
-            return f"GitHub API rate limit exceeded (HTTP 403).\n  Detail: {detail}"
-        return f"GitHub API forbidden (HTTP 403) for {url}\n  Detail: {detail}"
-    return f"GitHub API HTTP {status} for {url}: {message or text[:500]}"
+        return f"GitLab API forbidden (HTTP 403) for {url}\n  Detail: {detail}"
+    if status == 404:
+        return f"GitLab resource not found (HTTP 404) for {url}\n  Detail: {detail}"
+    return f"GitLab API HTTP {status} for {url}: {message or text[:500]}"
 
 
 def resolve_port(port: str) -> str:
@@ -208,26 +185,9 @@ def resolve_port(port: str) -> str:
 # HTTP
 # ---------------------------------------------------------------------------
 
-class _StripAuthOnRedirect(urllib.request.HTTPRedirectHandler):
-    """Azure blob rejects GitHub Authorization headers forwarded on 302."""
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: N802
-        new_req = super().redirect_request(req, fp, code, msg, headers, newurl)
-        if new_req is None:
-            return None
-        if (urllib.parse.urlparse(req.full_url).netloc
-                != urllib.parse.urlparse(newurl).netloc):
-            for h in ("Authorization", "authorization"):
-                if new_req.has_header(h):
-                    new_req.remove_header(h)
-        return new_req
-
-
 def _auth_headers(token: str) -> dict[str, str]:
     return {
-        "Accept": GITHUB_ACCEPT,
-        "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": GITHUB_API_VERSION,
+        "PRIVATE-TOKEN": token,
         "User-Agent": USER_AGENT,
     }
 
@@ -235,39 +195,36 @@ def _auth_headers(token: str) -> dict[str, str]:
 def _curl_header_args(token: str) -> list[str]:
     h = _auth_headers(token)
     return [
-        "-H", f"Authorization: {h['Authorization']}",
-        "-H", f"Accept: {h['Accept']}",
-        "-H", f"X-GitHub-Api-Version: {h['X-GitHub-Api-Version']}",
+        "-H", f"PRIVATE-TOKEN: {h['PRIVATE-TOKEN']}",
         "-H", f"User-Agent: {h['User-Agent']}",
     ]
 
 
-def github_request(
+def gitlab_request(
     url: str,
     token: str,
     *,
     die_on_error: bool = True,
 ) -> tuple[int, bytes, dict[str, str]]:
     req = urllib.request.Request(url, method="GET", headers=_auth_headers(token))
-    opener = urllib.request.build_opener(_StripAuthOnRedirect)
     try:
-        with opener.open(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=120, context=_SSL_CTX) as resp:
             body = resp.read()
             headers = {k.lower(): v for k, v in resp.headers.items()}
             return resp.getcode() or 200, body, headers
     except urllib.error.HTTPError as e:
         err = e.read().decode("utf-8", errors="replace")
         if die_on_error:
-            _die(format_github_api_error(e.code, err, url))
+            _die(format_gitlab_api_error(e.code, err, url))
         return e.code, err.encode("utf-8"), {}
     except urllib.error.URLError as e:
         if die_on_error:
-            _die(f"GitHub API request failed: {e}")
+            _die(f"GitLab API request failed: {e}")
         return 0, str(e).encode("utf-8"), {}
 
 
-def github_json(url: str, token: str) -> Any:
-    _, body, _ = github_request(url, token)
+def gitlab_json(url: str, token: str) -> Any:
+    _, body, _ = gitlab_request(url, token)
     try:
         return json.loads(body.decode("utf-8"))
     except json.JSONDecodeError as e:
@@ -275,133 +232,144 @@ def github_json(url: str, token: str) -> Any:
 
 
 def check_token(token: str, source: str) -> None:
-    shape = describe_token_shape(token)
-    _info(f"Token source: {source} ({shape})")
-    if token.startswith("github_pat_"):
-        _info("Note: espressif requires fine-grained PAT lifetime <= 366 days.")
-    elif token.startswith("ghp_") and len(token) < 50:
-        _warn("Classic PAT looks unusually short; regenerate if auth fails.")
-
-    code, body, headers = github_request(
-        "https://api.github.com/user", token, die_on_error=False
+    _info(f"Token source: {source}")
+    code, body, _ = gitlab_request(
+        f"{GITLAB_BASE}/api/v4/user", token, die_on_error=False
     )
     if code != 200:
-        _die(format_github_api_error(
-            code, body.decode("utf-8", errors="replace"), "https://api.github.com/user"
+        _die(format_gitlab_api_error(
+            code, body.decode("utf-8", errors="replace"), f"{GITLAB_BASE}/api/v4/user"
         ))
     try:
         user = json.loads(body.decode("utf-8"))
     except json.JSONDecodeError:
         _die("Token check returned invalid JSON from /user")
-    _info(f"Token OK — authenticated as '{user.get('login') or '?'}'")
-
-    scopes = headers.get("x-oauth-scopes", "")
-    if scopes:
-        have = {s.strip() for s in scopes.split(",") if s.strip()}
-        missing = {"repo", "workflow"} - have
-        if missing and not token.startswith("github_pat_"):
-            _warn(f"Token may lack scopes {sorted(missing)}.")
+    _info(f"Token OK — authenticated as '{user.get('username') or user.get('name') or '?'}'")
 
 
 # ---------------------------------------------------------------------------
-# Workflow run / artifacts
+# Pipeline / jobs
 # ---------------------------------------------------------------------------
 
-def parse_run_url(url_or_id: str) -> int:
+def parse_url(url_or_id: str) -> tuple[str, int]:
+    """
+    Return ('pipeline'|'job', id).
+    Bare digits are treated as a pipeline id; use a jobs URL for a job id.
+    """
     s = url_or_id.strip()
-    m = RUN_URL_RE.match(s)
+    m = JOB_URL_RE.match(s)
     if m:
-        owner, repo, run_id = m.group(1), m.group(2), int(m.group(3))
-        full = f"{owner}/{repo}"
-        if full.lower() != REPO.lower():
-            _warn(f"URL points to {full}, script targets {REPO}; continuing.")
-        return run_id
+        return "job", int(m.group(1))
+    m = PIPELINE_URL_RE.match(s)
+    if m:
+        return "pipeline", int(m.group(1))
+    if "/jobs/" in s.lower() and s.rstrip("/").split("/")[-1].isdigit():
+        return "job", int(s.rstrip("/").split("/")[-1])
+    if "/pipelines/" in s.lower() and s.rstrip("/").split("/")[-1].isdigit():
+        return "pipeline", int(s.rstrip("/").split("/")[-1])
     if s.isdigit():
-        return int(s)
+        return "pipeline", int(s)
     _die(
         f"Invalid --url value: {url_or_id!r}\n"
-        f"  Expected like https://github.com/{REPO}/actions/runs/28586915579"
+        f"  Expected a pipeline URL ({PIPELINE_WEB_PREFIX}/<id>),\n"
+        f"  a job URL ({JOB_WEB_PREFIX}/<id>), or a numeric pipeline id."
     )
 
 
-def get_workflow_run(token: str, run_id: int) -> dict[str, Any]:
-    return github_json(f"{API_BASE}/actions/runs/{run_id}", token)
-
-
-def is_at_firmware_run(run: dict[str, Any], branch: str) -> bool:
-    """
-    - branch contains 'esp8266': Build ESP-AT Project (name/title) or Merge branch...
-    - otherwise: only Merge branch ... into ... (usual Build ESP-AT Project titles)
-    """
-    name = (run.get("name") or "").strip()
-    title = (run.get("display_title") or "").strip()
-    is_merge = bool(MERGE_BRANCH_RE.match(name) or MERGE_BRANCH_RE.match(title))
-    is_build = name == AT_BUILD_WORKFLOW or title == AT_BUILD_WORKFLOW
-    if "esp8266" in branch.lower():
-        return is_merge or is_build
-    return is_merge
-
-
-def find_latest_successful_run(token: str, branch: str) -> dict[str, Any]:
+def find_latest_successful_pipeline(token: str, branch: str) -> dict[str, Any]:
     query = urllib.parse.urlencode(
-        {"branch": branch, "status": "success", "per_page": 10}
+        {"status": "success", "ref": branch, "per_page": "1", "page": "1"}
     )
-    data = github_json(f"{API_BASE}/actions/runs?{query}", token)
-    for run in data.get("workflow_runs") or []:
-        if is_at_firmware_run(run, branch):
-            return run
-    want = (
-        f"'{AT_BUILD_WORKFLOW}' or 'Merge branch ... into ...'"
-        if "esp8266" in branch.lower()
-        else "'Merge branch ... into ...'"
-    )
-    _die(
-        f"No matching GitHub Actions run on branch '{branch}' (want {want}). "
-        "Push a build or choose another --branch."
-    )
-
-
-def list_artifacts_for_run(token: str, run_id: int) -> dict[str, dict[str, Any]]:
-    """artifact_name -> newest non-expired artifact object."""
-    by_name: dict[str, dict[str, Any]] = {}
-    page = 1
-    while page <= 5:
-        query = urllib.parse.urlencode({"per_page": 100, "page": page})
-        data = github_json(
-            f"{API_BASE}/actions/runs/{run_id}/artifacts?{query}", token
+    data = gitlab_json(f"{API_BASE}/pipelines?{query}", token)
+    if not isinstance(data, list) or not data:
+        _die(
+            f"No successful GitLab pipeline on branch '{branch}'. "
+            "Push a build or choose another --branch."
         )
-        arts = data.get("artifacts") or []
-        if not arts:
+    return data[0]
+
+
+def get_pipeline(token: str, pipeline_id: int) -> dict[str, Any]:
+    return gitlab_json(f"{API_BASE}/pipelines/{pipeline_id}", token)
+
+
+def get_job(token: str, job_id: int) -> dict[str, Any]:
+    return gitlab_json(f"{API_BASE}/jobs/{job_id}", token)
+
+
+def list_jobs_for_pipeline(token: str, pipeline_id: int) -> list[dict[str, Any]]:
+    jobs: list[dict[str, Any]] = []
+    page = 1
+    while page <= 20:
+        query = urllib.parse.urlencode({"per_page": "100", "page": str(page)})
+        data = gitlab_json(
+            f"{API_BASE}/pipelines/{pipeline_id}/jobs?{query}", token
+        )
+        if not isinstance(data, list) or not data:
             break
-        for art in arts:
-            if art.get("expired"):
-                continue
-            name = art.get("name") or ""
-            if not name:
-                continue
-            prev = by_name.get(name)
-            if prev is None or int(art.get("id", 0)) > int(prev.get("id", 0)):
-                by_name[name] = art
-        if len(arts) < 100:
+        jobs.extend(data)
+        if len(data) < 100:
             break
         page += 1
-    return by_name
+    return jobs
 
 
-def select_artifact(
-    artifact_names: list[str],
-    artifacts: dict[str, dict[str, Any]],
-) -> dict[str, Any]:
-    if not artifact_names:
-        _die("No artifacts found for this workflow run.")
+def filter_firmware_jobs(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Firmware CI jobs are named with an 'esp' prefix (e.g. esp32c6_4mb_at)."""
+    return [
+        j for j in jobs
+        if (j.get("name") or "").lower().startswith("esp")
+    ]
 
-    print("Available artifacts:")
-    for i, n in enumerate(artifact_names):
-        print(f"  {i}: {n}")
+
+def _job_short_commit(job: dict[str, Any]) -> str:
+    commit = job.get("commit") or {}
+    if isinstance(commit, dict):
+        return str(commit.get("short_id") or "?")
+    return "?"
+
+
+def job_artifacts_size(job: dict[str, Any]) -> int | None:
+    af = job.get("artifacts_file")
+    if isinstance(af, dict) and af.get("size") is not None:
+        try:
+            size = int(af["size"])
+        except (TypeError, ValueError):
+            return None
+        return size if size > 0 else None
+    return None
+
+
+def select_job(jobs: list[dict[str, Any]]) -> dict[str, Any]:
+    jobs = filter_firmware_jobs(jobs)
+    if not jobs:
+        _die(
+            "No firmware jobs found in this pipeline "
+            "(expected job names starting with 'esp')."
+        )
+
+    print()
+    print(f"Found {len(jobs)} firmware job(s) (name starts with 'esp').\n")
+    sep = "-" * 81
+    print(sep)
+    print(
+        f"| {'idx':>3} | {'job name':<39} | {'state':^7} | "
+        f"{'commit':^7} | {'job id':>8} |"
+    )
+    print(sep)
+    for i, job in enumerate(jobs):
+        name = (job.get("name") or "?")[:39]
+        state = (job.get("status") or "?")[:7]
+        commit = _job_short_commit(job)[:7]
+        jid = str(job.get("id") or "?")
+        print(f"| {i:3d} | {name:<39} | {state:^7} | {commit:^7} | {jid:>8} |")
+    print(sep)
+    print()
+
     try:
         raw = input(
-            f"Select artifact by index "
-            f"(0-{len(artifact_names) - 1}, default 0): "
+            f"Select job by index "
+            f"(0-{len(jobs) - 1}, default 0): "
         ).strip()
     except EOFError:
         raw = ""
@@ -414,9 +382,17 @@ def select_artifact(
             idx = int(raw)
         except ValueError:
             _die(f"Invalid index: {raw!r}")
-    if not 0 <= idx < len(artifact_names):
+    if not 0 <= idx < len(jobs):
         _die(f"Index out of range: {idx}")
-    return artifacts[artifact_names[idx]]
+
+    job = jobs[idx]
+    status = job.get("status") or ""
+    if status != "success":
+        _die(
+            f"Expect job state <success>, but "
+            f"<{job.get('name')}> has state <{status}>"
+        )
+    return job
 
 
 # ---------------------------------------------------------------------------
@@ -460,11 +436,8 @@ def _validate_zip_bytes(body: bytes, ctype: str = "") -> None:
     if body[:2] == b"PK" or "zip" in ctype or "octet-stream" in ctype:
         return
     preview = body[:300].decode("utf-8", errors="replace")
-    if "InvalidAuthenticationInfo" in preview or "AuthenticationErrorDetail" in preview:
-        _die(
-            "Artifact download auth failed (GitHub token forwarded to storage). "
-            f"Preview: {preview[:200]}"
-        )
+    if len(body) < 50:
+        _die(f"ESP-AT firmware download failed (tiny response):\n{preview}")
     _die(f"Download did not return a zip file. Preview: {preview}")
 
 
@@ -484,13 +457,13 @@ def _download_with_curl(
         return None
 
     cmd = [
-        curl, "-fsSL",
+        curl, "-fsSL", "-k",
         "--connect-timeout", "30",
         "--max-time", "600",
         *_curl_header_args(token),
         archive_url,
     ]
-    _info("Downloading artifact zip (curl)...")
+    _info("Downloading job artifacts zip (curl)...")
     started = time.monotonic()
     try:
         proc = subprocess.Popen(
@@ -543,14 +516,13 @@ def _download_with_curl(
 def _download_with_urllib(
     archive_url: str, token: str, total: int | None
 ) -> bytes:
-    _info("Downloading artifact zip (urllib)...")
+    _info("Downloading job artifacts zip (urllib)...")
     req = urllib.request.Request(
         archive_url, method="GET", headers=_auth_headers(token)
     )
-    opener = urllib.request.build_opener(_StripAuthOnRedirect)
     started = time.monotonic()
     try:
-        with opener.open(req, timeout=300) as resp:
+        with urllib.request.urlopen(req, timeout=300, context=_SSL_CTX) as resp:
             headers = {k.lower(): v for k, v in resp.headers.items()}
             cl = headers.get("content-length")
             if cl and cl.isdigit():
@@ -567,7 +539,7 @@ def _download_with_urllib(
             body = b"".join(chunks)
     except urllib.error.HTTPError as e:
         err = e.read().decode("utf-8", errors="replace")
-        _die(format_github_api_error(e.code, err, archive_url))
+        _die(format_gitlab_api_error(e.code, err, archive_url))
     except urllib.error.URLError as e:
         _die(f"Artifact download failed: {e}")
     except KeyboardInterrupt:
@@ -579,13 +551,13 @@ def _download_with_urllib(
     return body
 
 
-def download_artifact_zip(
-    token: str, archive_url: str, size_hint: int | None = None
+def download_job_artifacts(
+    token: str, job_id: int, *, size_hint: int | None = None
 ) -> bytes:
-    """size_hint: artifact size_in_bytes from GitHub API (for progress %)."""
+    url = f"{API_BASE}/jobs/{job_id}/artifacts"
     total = size_hint if size_hint and size_hint > 0 else None
-    return _download_with_curl(archive_url, token, total) or _download_with_urllib(
-        archive_url, token, total
+    return _download_with_curl(url, token, total) or _download_with_urllib(
+        url, token, total
     )
 
 
@@ -648,6 +620,13 @@ def extract_factory_bin(zip_bytes: bytes) -> tuple[str, bytes]:
 # Save / flash
 # ---------------------------------------------------------------------------
 
+def _safe_job_name(name: str) -> str:
+    """Keep filesystem-friendly characters; collapse other runs to '_'."""
+    cleaned = re.sub(r"[^\w.+-]+", "_", name.strip(), flags=re.ASCII)
+    cleaned = cleaned.strip("._-") or "job"
+    return cleaned
+
+
 def _safe_keyword(keyword: str) -> str:
     """Keep filesystem-friendly characters; collapse other runs to '_'."""
     cleaned = re.sub(r"[^\w.+-]+", "_", keyword.strip(), flags=re.ASCII)
@@ -660,15 +639,16 @@ def _safe_keyword(keyword: str) -> str:
 def save_to_disk(
     zip_bytes: bytes,
     member: str,
-    artifact_name: str,
-    artifact_id: int,
+    job_name: str,
     keyword: str | None = None,
 ) -> Path:
-    # Original: {artifact_name}_{artifact_id}; with -k: insert keyword before id.
+    # Original: {job_name}-{date}; with -k: insert keyword before the date.
+    safe_name = _safe_job_name(job_name)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     if keyword:
-        base = f"{artifact_name}_{_safe_keyword(keyword)}_{artifact_id}"
+        base = f"{safe_name}_{_safe_keyword(keyword)}-{stamp}"
     else:
-        base = f"{artifact_name}_{artifact_id}"
+        base = f"{safe_name}-{stamp}"
     dst_dir = Path(base)
     dst_zip = Path(f"{base}.zip")
     if dst_dir.exists():
@@ -683,7 +663,14 @@ def save_to_disk(
 
     out_bin = (dst_dir / member).resolve()
     if not out_bin.is_file():
-        _die(f"Expected firmware missing after extract: {out_bin}")
+        # Some archives nest under a top-level dir; search like the old shell.
+        matches = [
+            p for p in dst_dir.rglob("factory*.bin")
+            if p.is_file() and "param" not in p.name.lower()
+        ]
+        if not matches:
+            _die(f"Expected firmware missing after extract: {out_bin}")
+        out_bin = matches[0].resolve()
     _info(f"Firmware saved: {out_bin}")
     return out_bin
 
@@ -738,25 +725,49 @@ def flash_from_path(port: str, baud: int, bin_path: Path | str) -> None:
     _info("Firmware successfully flashed to chip.")
 
 
-def _flash_via_esptool_api(port: str, baud: int, bin_data: bytes) -> bool:
+def _flash_via_esptool_api(
+    port: str, baud: int, bin_data: bytes, hint_name: str
+) -> bool:
+    """esptool 4.x: detect_chip + esp.run_stub(); write_flash takes Namespace."""
     if not _try_import_esptool():
         return False
     try:
-        from esptool.cmds import detect_chip, run_stub, write_flash
+        from argparse import Namespace
+        from esptool.cmds import detect_chip, write_flash
 
         _info(
             f"Flashing {_format_bytes(len(bin_data))} from memory via esptool API "
             f"(port={port}, baud={baud})..."
         )
+        bio = io.BytesIO(bin_data)
+        bio.name = hint_name or "firmware.bin"
+        args = Namespace(
+            addr_filename=[(0x0, bio)],
+            compress=None,
+            no_compress=False,
+            no_stub=False,
+            force=False,
+            encrypt=False,
+            encrypt_files=None,
+            erase_all=False,
+            flash_mode="keep",
+            flash_freq="keep",
+            flash_size="keep",
+            spi_connection=None,
+            no_progress=False,
+            verify=False,
+            ignore_flash_encryption_efuse_setting=False,
+        )
         esp = detect_chip(port=port, baud=115200)
         try:
-            esp = run_stub(esp)
+            if hasattr(esp, "run_stub"):
+                esp = esp.run_stub()
             if baud and baud != 115200:
                 try:
                     esp.change_baud(baud)
                 except Exception:
                     pass
-            write_flash(esp, [(0x0, bin_data)])
+            write_flash(esp, args)
         finally:
             for closer in (
                 lambda: esp.hard_reset(),
@@ -773,7 +784,28 @@ def _flash_via_esptool_api(port: str, baud: int, bin_data: bytes) -> bool:
         return False
 
 
+def _run_esptool_flash(port: str, baud: int, bin_path: Path | str) -> int:
+    """Run esptool write_flash; return exit code (does not exit the process)."""
+    cmd = find_esptool_cmd() + [
+        "--port", port,
+        "--baud", str(baud),
+        "write_flash",
+        "0x0",
+        str(bin_path),
+    ]
+    _info("Running: " + " ".join(cmd))
+    try:
+        return subprocess.run(cmd).returncode
+    except OSError as e:
+        _warn(f"Failed to start esptool: {e}")
+        return 127
+
+
 def _flash_via_memfd(port: str, baud: int, bin_data: bytes) -> bool:
+    """
+    Pass firmware to esptool via memfd. Use /proc/<parent_pid>/fd/N so the
+    child process can open the parent's memfd (/proc/self/fd/N is wrong there).
+    """
     if not hasattr(os, "memfd_create"):
         return False
     fd: int | None = None
@@ -784,11 +816,16 @@ def _flash_via_memfd(port: str, baud: int, bin_data: bytes) -> bool:
         while off < len(view):
             off += os.write(fd, view[off:])
         os.lseek(fd, 0, os.SEEK_SET)
+        path = f"/proc/{os.getpid()}/fd/{fd}"
         _info(
             f"Flashing via in-memory fd "
             f"({_format_bytes(len(bin_data))}, no disk)..."
         )
-        flash_from_path(port, baud, f"/proc/self/fd/{fd}")
+        rc = _run_esptool_flash(port, baud, path)
+        if rc != 0:
+            _warn(f"memfd flash failed (esptool exit {rc})")
+            return False
+        _info("Firmware successfully flashed to chip.")
         return True
     except Exception as e:
         _warn(f"memfd flash failed ({e})")
@@ -803,7 +840,7 @@ def _flash_via_memfd(port: str, baud: int, bin_data: bytes) -> bool:
 
 def flash_from_memory(port: str, baud: int, bin_data: bytes, hint_name: str) -> None:
     """Prefer API bytes, then Linux memfd; temp file only as last resort."""
-    if _flash_via_esptool_api(port, baud, bin_data):
+    if _flash_via_esptool_api(port, baud, bin_data, hint_name):
         return
     if _flash_via_memfd(port, baud, bin_data):
         return
@@ -832,42 +869,45 @@ def flash_from_memory(port: str, baud: int, bin_data: bytes, hint_name: str) -> 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="at-download-gh",
+        prog="at-download-gl",
         description=(
-            "Download the latest esp-at firmware from GitHub Actions "
+            "Download the latest esp-at firmware from GitLab CI "
             f"(default branch: {DEFAULT_BRANCH}), optionally flash a device."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Token:\n"
-            "  https://github.com/settings/tokens  (scopes: repo, workflow)\n"
-            f"  Save to {DEFAULT_TOKEN_FILES[0]} or set GITHUB_TOKEN / GH_TOKEN.\n"
-            "  Fine-grained PAT lifetime must be <= 366 days for espressif.\n"
+            f"  {GITLAB_BASE}/-/user_settings/personal_access_tokens\n"
+            "  Scopes: api, read_user, read_api.\n"
+            f"  Save to {DEFAULT_TOKEN_FILES[0]} or set GITLAB_TOKEN.\n"
             "\n"
             "Examples:\n"
-            "  at-download-gh.py\n"
-            "      Interactive: pick a module from the latest master build,\n"
+            "  at-download-gl.py\n"
+            "      Interactive: pick a job from the latest master pipeline,\n"
             "      save firmware zip/bin to the current directory.\n"
             "\n"
-            "  at-download-gh.py -p /dev/ttyUSB0\n"
+            "  at-download-gl.py -p /dev/ttyUSB0\n"
             "      Download from master, then flash to that serial port.\n"
             "\n"
-            "  at-download-gh.py -p 0 -m\n"
+            "  at-download-gl.py -p 0 -m\n"
             "      Flash /dev/ttyUSB0; -p 0 is short for /dev/ttyUSB0.\n"
             "      -m keeps zip/bin in memory only (no files left on disk).\n"
             "\n"
-            "  at-download-gh.py -B release/v2.3.0.0_esp8266\n"
-            "      Use the latest successful build on another branch\n"
+            "  at-download-gl.py -B release/v2.3.0.0_esp8266\n"
+            "      Use the latest successful pipeline on another branch\n"
             "      instead of the default master.\n"
             "\n"
-            f"  at-download-gh.py -u https://github.com/{REPO}/actions/runs/28586915579\n"
-            "      Download from a specific GitHub Actions run URL\n"
-            "      (skip branch lookup). You can also pass a numeric run id.\n"
+            f"  at-download-gl.py -u {PIPELINE_WEB_PREFIX}/352799\n"
+            "      Download from a specific pipeline (interactive job pick).\n"
+            "      A bare numeric id is treated as a pipeline id.\n"
+            "\n"
+            f"  at-download-gl.py -u {JOB_WEB_PREFIX}/14643605\n"
+            "      Download artifacts from a specific job URL.\n"
         ),
     )
     p.add_argument(
         "-B", "--branch", default=DEFAULT_BRANCH,
-        help=f"Branch for Actions artifacts (default: {DEFAULT_BRANCH})",
+        help=f"Branch for latest successful pipeline (default: {DEFAULT_BRANCH})",
     )
     p.add_argument(
         "-p", "--port",
@@ -883,18 +923,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "-u", "--url", metavar="URL",
-        help=f"Actions run URL or id, e.g. https://github.com/{REPO}/actions/runs/<id>",
+        help=(
+            "Pipeline/job URL or numeric pipeline id, e.g. "
+            f"{PIPELINE_WEB_PREFIX}/<id> or {JOB_WEB_PREFIX}/<id>"
+        ),
     )
     p.add_argument(
         "-k", "--keyword", metavar="KEYWORD",
         help=(
             "Optional tag inserted into the saved zip name "
-            "({artifact}_{keyword}_{id}.zip)"
+            "({job}_{keyword}-{date}.zip)"
         ),
     )
     p.add_argument(
         "-t", "--token-file", metavar="PATH",
-        help="GitHub token file (overrides default search paths)",
+        help="GitLab token file (overrides default search paths)",
     )
     p.add_argument("legacy_port", nargs="?", help=argparse.SUPPRESS)
     return p
@@ -915,39 +958,51 @@ def main(argv: list[str] | None = None) -> int:
     token, token_source = load_token(args.token_file)
     check_token(token, token_source)
 
+    job: dict[str, Any]
     if args.url:
-        run_id = parse_run_url(args.url)
-        _info(f"Using workflow run from --url (id={run_id})")
-        run = get_workflow_run(token, run_id)
+        kind, entity_id = parse_url(args.url)
+        if kind == "job":
+            _info(f"Using job from --url (id={entity_id})")
+            job = get_job(token, entity_id)
+            status = job.get("status") or ""
+            if status and status != "success":
+                _warn(f"Job status is '{status}' (expected success); continuing.")
+        else:
+            _info(f"Using pipeline from --url (id={entity_id})")
+            pipeline = get_pipeline(token, entity_id)
+            _info(
+                f"Pipeline: id={pipeline.get('id')} ref={pipeline.get('ref')} "
+                f"status={pipeline.get('status')} "
+                f"sha={(pipeline.get('sha') or '')[:8]}"
+            )
+            _info(f"Created: {pipeline.get('created_at', '?')}")
+            web = pipeline.get("web_url") or f"{PIPELINE_WEB_PREFIX}/{entity_id}"
+            _info(f"GitLab pipeline: {web}")
+            jobs = list_jobs_for_pipeline(token, entity_id)
+            job = select_job(jobs)
     else:
         _info(f"Using branch: {args.branch}")
-        _info("Looking up latest successful GitHub Actions run...")
-        run = find_latest_successful_run(token, args.branch)
-        run_id = int(run["id"])
+        _info("Looking up latest successful GitLab pipeline...")
+        pipeline = find_latest_successful_pipeline(token, args.branch)
+        pipeline_id = int(pipeline["id"])
+        _info(
+            f"Pipeline: id={pipeline_id} ref={pipeline.get('ref')} "
+            f"status={pipeline.get('status')} "
+            f"sha={(pipeline.get('sha') or '')[:8]}"
+        )
+        _info(f"Created: {pipeline.get('created_at', '?')}")
+        web = pipeline.get("web_url") or f"{PIPELINE_WEB_PREFIX}/{pipeline_id}"
+        _info(f"GitLab pipeline: {web}")
+        jobs = list_jobs_for_pipeline(token, pipeline_id)
+        job = select_job(jobs)
 
-    run_url = f"https://github.com/{REPO}/actions/runs/{run_id}"
-    title = run.get("display_title") or run.get("name") or "?"
-    _info(f"Workflow: {run.get('name', '?')} — {title}")
-    _info(f"GitHub Actions: {run_url}")
-    _info(f"Created: {run.get('created_at', '?')}")
+    job_id = int(job["id"])
+    job_name = job.get("name") or "?"
+    _info(f"Selected job: {job_name} (id={job_id})")
+    _info(f"GitLab job: {JOB_WEB_PREFIX}/{job_id}")
 
-    _info("Fetching artifacts for this run...")
-    artifacts = list_artifacts_for_run(token, run_id)
-    artifact_names = sorted(artifacts.keys())
-    _info(f"Found {len(artifact_names)} artifact(s).")
-
-    art = select_artifact(artifact_names, artifacts)
-    name = art["name"]
-    art_id = int(art["id"])
-    _info(f"Selected artifact: {name}")
-
-    size_hint = art.get("size_in_bytes")
-    try:
-        size_hint_i = int(size_hint) if size_hint is not None else None
-    except (TypeError, ValueError):
-        size_hint_i = None
-    zip_bytes = download_artifact_zip(
-        token, art["archive_download_url"], size_hint=size_hint_i
+    zip_bytes = download_job_artifacts(
+        token, job_id, size_hint=job_artifacts_size(job)
     )
     member, bin_data = extract_factory_bin(zip_bytes)
 
@@ -955,7 +1010,7 @@ def main(argv: list[str] | None = None) -> int:
         flash_from_memory(port, args.baud, bin_data, member)
         return 0
 
-    bin_path = save_to_disk(zip_bytes, member, name, art_id, keyword=args.keyword)
+    bin_path = save_to_disk(zip_bytes, member, job_name, keyword=args.keyword)
     if port:
         flash_from_path(port, args.baud, bin_path)
     else:
