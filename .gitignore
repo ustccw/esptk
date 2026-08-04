@@ -9,3 +9,6 @@
 
 # cache dir
 **/__pycache__/
+
+# esp logs
+esp_logs
