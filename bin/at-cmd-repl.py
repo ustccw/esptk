@@ -58,12 +58,31 @@ _LEVEL_COLORS = {
     'F': '31',  # red (fatal)
 }
 
-CTRL_R = '\x12'
+CTRL_A = '\x01'
 CTRL_C = '\x03'
 CTRL_D = '\x04'
+CTRL_E = '\x05'
+CTRL_K = '\x0b'
+CTRL_R = '\x12'
+CTRL_U = '\x15'
+CTRL_W = '\x17'
 BACKSPACE_CHARS = ('\x7f', '\x08')
 
 REPL_PROMPT = '>>> '
+
+# Word chars for Ctrl+Left/Right / Ctrl+W (shell-like).
+_WORD_CHAR_RE = re.compile(r'[A-Za-z0-9_]')
+
+# Windows msvcrt extended keys (prefix \xe0 / \x00) -> CSI sequences.
+_WIN_EXT_KEYS = {
+    'K': '\x1b[D',      # Left
+    'M': '\x1b[C',      # Right
+    'G': '\x1b[H',      # Home
+    'O': '\x1b[F',      # End
+    'S': '\x1b[3~',     # Delete
+    's': '\x1b[1;5D',   # Ctrl+Left
+    't': '\x1b[1;5C',   # Ctrl+Right
+}
 
 # Path prefixes that trigger file-send mode.
 _WIN_DRIVE_RE = re.compile(r'^[A-Za-z]:[\\/]')
@@ -90,6 +109,11 @@ class AtCmdRepl:
 
         self._stdin_old_attrs = None
         self._line_buf: List[str] = []
+        self._line_cursor: int = 0  # index into _line_buf (0 == after >>>)
+        # Leftover stdin bytes/chars when a UTF-8 or CSI sequence is split
+        # across reads (select + TextIO.read(1) is unsafe; we use os.read).
+        self._stdin_byte_buf = bytearray()
+        self._stdin_esc_buf: str = ''
 
         # Per-port RX reassembly: only emit complete lines (or idle-flushed partials).
         self._rx_bufs: Dict[str, str] = {'log': '', 'cmd': ''}
@@ -177,6 +201,10 @@ class AtCmdRepl:
         line = ''.join(self._line_buf)
         if line:
             sys.stdout.write(line)
+        # Place cursor at _line_cursor (may be mid-line while editing).
+        behind = len(self._line_buf) - self._line_cursor
+        if behind > 0:
+            sys.stdout.write(f'\033[{behind}D')
         sys.stdout.flush()
 
     def _should_show_repl_prompt(self) -> bool:
@@ -538,6 +566,9 @@ class AtCmdRepl:
             fd = sys.stdin.fileno()
             self._stdin_old_attrs = termios.tcgetattr(fd)
             tty.setcbreak(fd)
+            # Bracketed paste: terminal wraps paste in ESC[200~ ... ESC[201~.
+            sys.stdout.write('\033[?2004h')
+            sys.stdout.flush()
         except Exception:
             self._stdin_old_attrs = None
 
@@ -545,26 +576,212 @@ class AtCmdRepl:
         if self._stdin_old_attrs is None or termios is None:
             return
         try:
+            if sys.stdout.isatty():
+                sys.stdout.write('\033[?2004l')
+                sys.stdout.flush()
             termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, self._stdin_old_attrs)
         except Exception:
             pass
         self._stdin_old_attrs = None
 
-    def _read_stdin_char(self) -> Optional[str]:
+    def _read_stdin_chunk(self) -> str:
+        """Read all currently available stdin input.
+
+        Must use os.read on the raw fd. Mixing select() on the fd with
+        buffered sys.stdin.read(1) drops paste: the first read() slurps the
+        whole paste into TextIO, select() then sees an empty fd, and only the
+        first character (e.g. ``A`` of ``AT+...``) is processed.
+        """
         if not sys.stdin.isatty():
-            return None
+            return ''
         try:
             if msvcrt is not None and platform.system().lower() == 'windows':
-                if not msvcrt.kbhit():
-                    return None
-                ch = msvcrt.getch()
-                return ch.decode('latin1') if isinstance(ch, bytes) else ch
-            ready, _, _ = select.select([sys.stdin], [], [], 0)
+                chars: List[str] = []
+                while msvcrt.kbhit():
+                    ch = msvcrt.getch()
+                    if isinstance(ch, bytes):
+                        # Extended keys: \xe0 / \x00 + code
+                        if ch in (b'\xe0', b'\x00') and msvcrt.kbhit():
+                            code = msvcrt.getch()
+                            key = code.decode('latin1') if isinstance(code, bytes) else code
+                            chars.append(_WIN_EXT_KEYS.get(key, ''))
+                            continue
+                        chars.append(ch.decode('latin1'))
+                    else:
+                        chars.append(ch)
+                return ''.join(chars)
+
+            fd = sys.stdin.fileno()
+            ready, _, _ = select.select([fd], [], [], 0)
             if not ready:
-                return None
-            return sys.stdin.read(1)
+                return ''
+            data = os.read(fd, 4096)
+            if not data:
+                return ''
+            self._stdin_byte_buf.extend(data)
+            try:
+                text = self._stdin_byte_buf.decode('utf-8')
+                self._stdin_byte_buf.clear()
+                return text
+            except UnicodeDecodeError as e:
+                # Keep a trailing incomplete UTF-8 sequence for the next read.
+                if e.start > 0:
+                    text = bytes(self._stdin_byte_buf[: e.start]).decode('utf-8')
+                    del self._stdin_byte_buf[: e.start]
+                    return text
+                # Invalid leading byte — drop it and retry next time.
+                del self._stdin_byte_buf[0]
+                return ''
         except Exception:
-            return None
+            return ''
+
+    @staticmethod
+    def _csi_final_index(buf: str, start: int) -> int:
+        """Return index of CSI final byte, or -1 if the sequence is incomplete."""
+        # CSI: ESC [ params... final(0x40-0x7E)
+        i = start
+        while i < len(buf):
+            o = ord(buf[i])
+            if 0x40 <= o <= 0x7E:
+                return i
+            i += 1
+        return -1
+
+    def _parse_stdin_escape(self, buf: str) -> Tuple[Optional[str], str, str]:
+        """Parse a leading ANSI escape into an editing key name.
+
+        Returns ``(key, remainder, incomplete)``. ``key`` is one of
+        left/right/home/end/delete/ctrl-left/ctrl-right, or None to ignore.
+        ``incomplete`` is non-empty when the escape was split across reads.
+        """
+        if not buf or buf[0] != '\x1b':
+            return None, buf, ''
+        if len(buf) == 1:
+            return None, '', buf
+
+        # SS3: ESC O A/B/C/D/H/F (application cursor keys)
+        if buf[1] == 'O':
+            if len(buf) < 3:
+                return None, '', buf
+            key = {
+                'D': 'left',
+                'C': 'right',
+                'H': 'home',
+                'F': 'end',
+            }.get(buf[2])
+            return key, buf[3:], ''
+
+        # CSI: ESC [ ...
+        if buf[1] != '[':
+            # ESC + single char (Alt-key); ignore
+            return None, buf[2:], ''
+
+        final = self._csi_final_index(buf, 2)
+        if final < 0:
+            return None, '', buf
+
+        params = buf[2:final]
+        cmd = buf[final]
+        rest = buf[final + 1 :]
+
+        # Modifier form: ESC [ 1 ; 5 D  (5 = Ctrl) — also ESC [ 5 D on some terms
+        mod = 1
+        body = params
+        if ';' in params:
+            parts = params.split(';')
+            body = parts[0] if parts[0] else '1'
+            try:
+                mod = int(parts[1]) if len(parts) > 1 and parts[1] else 1
+            except ValueError:
+                mod = 1
+        elif params.isdigit() and cmd in 'ABCDHF' and params in ('5', '3', '2', '4'):
+            # Rare short form ESC [ 5 D
+            body = '1'
+            mod = int(params)
+
+        ctrl = bool((mod - 1) & 4)  # xterm: bit 4 of (mod-1) = Control
+
+        if cmd == 'D':
+            return ('ctrl-left' if ctrl else 'left'), rest, ''
+        if cmd == 'C':
+            return ('ctrl-right' if ctrl else 'right'), rest, ''
+        if cmd == 'H':
+            return 'home', rest, ''
+        if cmd == 'F':
+            return 'end', rest, ''
+        if cmd == '~':
+            # VT sequences: 1~/7~ home, 4~/8~ end, 3~ delete
+            code = body.split(';')[0] if body else ''
+            return {
+                '1': 'home',
+                '7': 'home',
+                '4': 'end',
+                '8': 'end',
+                '3': 'delete',
+            }.get(code), rest, ''
+
+        # Bracketed paste markers 200~/201~ and other CSI — ignore
+        return None, rest, ''
+
+    @staticmethod
+    def _is_word_char(ch: str) -> bool:
+        return bool(_WORD_CHAR_RE.match(ch))
+
+    def _clamp_cursor(self) -> None:
+        if self._line_cursor < 0:
+            self._line_cursor = 0
+        elif self._line_cursor > len(self._line_buf):
+            self._line_cursor = len(self._line_buf)
+
+    def _move_cursor(self, pos: int) -> None:
+        self._line_cursor = max(0, min(pos, len(self._line_buf)))
+        self._clear_input_line_for_output()
+        self._redraw_input_line()
+
+    def _cursor_left(self) -> None:
+        if self._line_cursor > 0:
+            self._move_cursor(self._line_cursor - 1)
+
+    def _cursor_right(self) -> None:
+        if self._line_cursor < len(self._line_buf):
+            self._move_cursor(self._line_cursor + 1)
+
+    def _cursor_home(self) -> None:
+        self._move_cursor(0)
+
+    def _cursor_end(self) -> None:
+        self._move_cursor(len(self._line_buf))
+
+    def _cursor_word_left(self) -> None:
+        i = self._line_cursor
+        while i > 0 and not self._is_word_char(self._line_buf[i - 1]):
+            i -= 1
+        while i > 0 and self._is_word_char(self._line_buf[i - 1]):
+            i -= 1
+        self._move_cursor(i)
+
+    def _cursor_word_right(self) -> None:
+        i = self._line_cursor
+        n = len(self._line_buf)
+        while i < n and not self._is_word_char(self._line_buf[i]):
+            i += 1
+        while i < n and self._is_word_char(self._line_buf[i]):
+            i += 1
+        self._move_cursor(i)
+
+    def _handle_editing_key(self, key: str) -> None:
+        handlers = {
+            'left': self._cursor_left,
+            'right': self._cursor_right,
+            'home': self._cursor_home,
+            'end': self._cursor_end,
+            'delete': self._handle_delete,
+            'ctrl-left': self._cursor_word_left,
+            'ctrl-right': self._cursor_word_right,
+        }
+        handler = handlers.get(key)
+        if handler:
+            handler()
 
     @staticmethod
     def looks_like_path(text: str) -> bool:
@@ -615,6 +832,7 @@ class AtCmdRepl:
     def _submit_line(self) -> None:
         line = ''.join(self._line_buf)
         self._line_buf = []
+        self._line_cursor = 0
         self._repl_prompt_visible = False
         if sys.stdout.isatty():
             sys.stdout.write('\r\n')
@@ -635,45 +853,153 @@ class AtCmdRepl:
             sys.stdout.flush()
 
     def _handle_backspace(self) -> None:
-        if not self._line_buf:
+        if self._line_cursor <= 0:
             return
-        self._line_buf.pop()
-        if sys.stdout.isatty():
+        self._line_cursor -= 1
+        del self._line_buf[self._line_cursor]
+        if (
+            sys.stdout.isatty()
+            and self._line_cursor == len(self._line_buf)
+            and self._repl_prompt_visible
+        ):
+            # Fast path: deleting at end of line.
             sys.stdout.write('\b \b')
             sys.stdout.flush()
+            return
+        self._clear_input_line_for_output()
+        self._redraw_input_line()
+
+    def _handle_delete(self) -> None:
+        """Forward-delete character under the cursor (Delete key)."""
+        if self._line_cursor >= len(self._line_buf):
+            return
+        del self._line_buf[self._line_cursor]
+        self._clear_input_line_for_output()
+        self._redraw_input_line()
+
+    def _kill_to_end(self) -> None:
+        if self._line_cursor >= len(self._line_buf):
+            return
+        del self._line_buf[self._line_cursor :]
+        self._clear_input_line_for_output()
+        self._redraw_input_line()
+
+    def _kill_line(self) -> None:
+        if not self._line_buf:
+            return
+        self._line_buf = []
+        self._line_cursor = 0
+        self._clear_input_line_for_output()
+        self._redraw_input_line()
+
+    def _kill_word_backward(self) -> None:
+        if self._line_cursor <= 0:
+            return
+        end = self._line_cursor
+        i = end
+        while i > 0 and not self._is_word_char(self._line_buf[i - 1]):
+            i -= 1
+        while i > 0 and self._is_word_char(self._line_buf[i - 1]):
+            i -= 1
+        del self._line_buf[i:end]
+        self._line_cursor = i
+        self._clear_input_line_for_output()
+        self._redraw_input_line()
+
+    def _insert_printable(self, text: str) -> None:
+        """Insert printable text at the cursor and refresh the display."""
+        if not text:
+            return
+        if self._should_show_repl_prompt() and not self._repl_prompt_visible:
+            self._emit_repl_prompt()
+        at_end = self._line_cursor == len(self._line_buf)
+        for i, ch in enumerate(text):
+            self._line_buf.insert(self._line_cursor + i, ch)
+        self._line_cursor += len(text)
+        # Fast path: single char typed at end — just echo.
+        if len(text) == 1 and at_end and self._repl_prompt_visible:
+            self._echo_char(text)
+            return
+        self._clear_input_line_for_output()
+        self._redraw_input_line()
 
     def _poll_stdin(self) -> None:
-        while True:
-            ch = self._read_stdin_char()
-            if ch is None:
-                return
+        chunk = self._stdin_esc_buf + self._read_stdin_chunk()
+        self._stdin_esc_buf = ''
+        if not chunk:
+            return
+
+        pending_printable: List[str] = []
+
+        def flush_printable() -> None:
+            if pending_printable:
+                self._insert_printable(''.join(pending_printable))
+                pending_printable.clear()
+
+        while chunk:
+            ch = chunk[0]
+            if ch == '\x1b':
+                flush_printable()
+                key, chunk, incomplete = self._parse_stdin_escape(chunk)
+                if incomplete:
+                    self._stdin_esc_buf = incomplete
+                    return
+                if key:
+                    self._handle_editing_key(key)
+                continue
+            chunk = chunk[1:]
             if ch == CTRL_C:
+                flush_printable()
                 self.should_exit = True
                 self.log_info('\nCtrl+C pressed, exiting...')
                 return
             if ch == CTRL_D:
+                flush_printable()
                 if not self._line_buf:
                     self.should_exit = True
                     self.log_info('\nCtrl+D pressed, exiting...')
                     return
+                # Shell-like: Ctrl+D with text = forward-delete
+                self._handle_delete()
                 continue
             if ch == CTRL_R:
+                flush_printable()
                 self.log_info('Ctrl+R pressed, resetting ESP chip...')
                 self.reset_esp_chip()
                 continue
+            if ch == CTRL_A:
+                flush_printable()
+                self._cursor_home()
+                continue
+            if ch == CTRL_E:
+                flush_printable()
+                self._cursor_end()
+                continue
+            if ch == CTRL_K:
+                flush_printable()
+                self._kill_to_end()
+                continue
+            if ch == CTRL_U:
+                flush_printable()
+                self._kill_line()
+                continue
+            if ch == CTRL_W:
+                flush_printable()
+                self._kill_word_backward()
+                continue
             if ch in BACKSPACE_CHARS:
+                flush_printable()
                 self._handle_backspace()
                 continue
             if ch in ('\r', '\n'):
+                flush_printable()
                 self._submit_line()
                 continue
             if ord(ch) < 32:
                 continue
-            # Ensure >>> is visible before first typed char when idle.
-            if self._should_show_repl_prompt() and not self._repl_prompt_visible:
-                self._emit_repl_prompt()
-            self._line_buf.append(ch)
-            self._echo_char(ch)
+            pending_printable.append(ch)
+
+        flush_printable()
 
     # ------------------------------------------------------------------
     # Serial read helpers
@@ -763,7 +1089,10 @@ class AtCmdRepl:
         signal.signal(signal.SIGINT, self.signal_handler)
         self._enable_hotkeys()
         self.log_info('AT Command REPL started')
-        self.log_info('Hotkey: Ctrl+R resets the ESP chip; Ctrl+C exits')
+        self.log_info(
+            'Hotkeys: arrows/Home/End edit the line; Ctrl+Left/Right jump words; '
+            'Ctrl+A/E home/end; Ctrl+K/U/W kill; Ctrl+R reset chip; Ctrl+C exit'
+        )
         if self.port0 == self.port1:
             self.log_info(f'Using shared port for log+cmd: {self.port0}')
             if self.port0_baudrate != self.port1_baudrate:
@@ -822,6 +1151,9 @@ def create_argument_parser() -> argparse.ArgumentParser:
         epilog=(
             'While running: after the module prints ready, a >>> prompt appears. '
             'Type a command and press Enter; after OK/ERROR/FAIL, >>> returns. '
+            'Line editing: Left/Right, Home/End, Delete, Backspace; '
+            'Ctrl+Left/Right word jump; Ctrl+A/E home/end; '
+            'Ctrl+K kill-to-end; Ctrl+U kill-line; Ctrl+W kill-word. '
             'Ctrl+R resets the chip (log port); Ctrl+C exits. '
             'Path-like lines (/ ./ ~/ drive:) send the file as raw bytes; '
             'all other input is sent as an AT line with \\r\\n appended.'
