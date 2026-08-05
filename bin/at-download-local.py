@@ -488,6 +488,10 @@ def select_candidate(cands: list[FirmwareCandidate]) -> FirmwareCandidate:
 
     # Newest first
     cands = sorted(cands, key=lambda c: _path_mtime(c.display_path), reverse=True)
+
+    if len(cands) == 1:
+        return cands[0]
+
     print("Available firmware:")
     for i, c in enumerate(cands):
         idx = _c("1;36", str(i))

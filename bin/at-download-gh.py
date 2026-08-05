@@ -462,6 +462,9 @@ def select_artifact(
     if not artifact_names:
         _die("No artifacts found for this workflow run.")
 
+    if len(artifact_names) == 1:
+        return artifacts[artifact_names[0]]
+
     print("Available artifacts:")
     for i, n in enumerate(artifact_names):
         print(f"  {i}: {n}")
@@ -846,6 +849,10 @@ def _flash_via_esptool_api(port: str, baud: int, bin_data: bytes) -> bool:
 
 
 def _flash_via_memfd(port: str, baud: int, bin_data: bytes) -> bool:
+    """
+    Pass firmware to esptool via memfd. Use /proc/<parent_pid>/fd/N so the
+    child process can open the parent's memfd (/proc/self/fd/N is wrong there).
+    """
     if not hasattr(os, "memfd_create"):
         return False
     fd: int | None = None
@@ -856,11 +863,25 @@ def _flash_via_memfd(port: str, baud: int, bin_data: bytes) -> bool:
         while off < len(view):
             off += os.write(fd, view[off:])
         os.lseek(fd, 0, os.SEEK_SET)
+        # Child esptool must open *this* process's fd, not its own self.
+        bin_path = f"/proc/{os.getpid()}/fd/{fd}"
+        cmd = find_esptool_cmd() + [
+            "--port", port,
+            "--baud", str(baud),
+            "write_flash",
+            "0x0",
+            bin_path,
+        ]
         _info(
             f"Flashing via in-memory fd "
             f"({_format_bytes(len(bin_data))}, no disk)..."
         )
-        flash_from_path(port, baud, f"/proc/self/fd/{fd}")
+        _info("Running: " + " ".join(cmd))
+        proc = subprocess.run(cmd, check=False)
+        if proc.returncode != 0:
+            _warn(f"memfd flash failed (esptool exit {proc.returncode})")
+            return False
+        _info("Firmware successfully flashed to chip.")
         return True
     except Exception as e:
         _warn(f"memfd flash failed ({e})")
