@@ -19,6 +19,8 @@ Examples:
       Same as above (port /dev/ttyUSB0), but keep zip/bin in memory only.
   at-download-gl.py -B release/v2.3.0.0_esp8266
       Use the latest successful pipeline on another branch instead of master.
+  at-download-gl.py -c esp32c5
+      Only list firmware jobs for that chip (esp32 does not match esp32c3).
   at-download-gl.py -u https://gitlab.espressif.cn:6688/application/esp-at/-/pipelines/352799
       Download from a specific pipeline URL (interactive job pick).
   at-download-gl.py -u https://gitlab.espressif.cn:6688/application/esp-at/-/jobs/14643605
@@ -74,6 +76,21 @@ JOB_URL_RE = re.compile(
     r"^https?://[^/]+/.+/-/jobs/(\d+)/?(?:[?#].*)?$",
     re.IGNORECASE,
 )
+# Longest-first: esp32c61 before esp32c6 before esp32.
+KNOWN_CHIP_PREFIXES = (
+    "esp32c61",
+    "esp32c6",
+    "esp32c5",
+    "esp32c3",
+    "esp32c2",
+    "esp32s3",
+    "esp32s2",
+    "esp32p4",
+    "esp32h2",
+    "esp32",
+    "esp8266",
+)
+_SERIES_SUFFIX_RE = re.compile(r"^[cshp]\d")
 
 
 # ---------------------------------------------------------------------------
@@ -314,12 +331,65 @@ def list_jobs_for_pipeline(token: str, pipeline_id: int) -> list[dict[str, Any]]
     return jobs
 
 
-def filter_firmware_jobs(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def filter_firmware_jobs(
+    jobs: list[dict[str, Any]],
+    chip: str | None = None,
+) -> list[dict[str, Any]]:
     """Firmware CI jobs are named with an 'esp' prefix (e.g. esp32c6_4mb_at)."""
-    return [
+    out = [
         j for j in jobs
         if (j.get("name") or "").lower().startswith("esp")
     ]
+    if chip:
+        matched = [
+            j for j in out
+            if name_matches_chip(j.get("name") or "", chip)
+        ]
+        if not matched:
+            seen = sorted({
+                chip_from_name(j.get("name") or "")
+                or _normalize_chip_token(j.get("name") or "")[:12]
+                for j in out
+            })
+            _die(
+                f"No firmware job matching chip {chip!r}. "
+                f"Seen chip prefixes: {', '.join(x for x in seen if x) or '(none)'}"
+            )
+        out = matched
+    return out
+
+
+def _normalize_chip_token(s: str) -> str:
+    """Lowercase and strip -/_ so ESP32-C3 / esp32_c3 / esp32c3 match."""
+    return s.strip().lower().replace("_", "").replace("-", "")
+
+
+def chip_from_name(name: str) -> str | None:
+    """Best-known chip prefix embedded at the start of an artifact/job name."""
+    n = _normalize_chip_token(name)
+    for chip in KNOWN_CHIP_PREFIXES:
+        if n.startswith(chip):
+            return chip
+    return None
+
+
+def name_matches_chip(name: str, chip: str) -> bool:
+    """
+    True if name belongs to chip. Exact chip identity:
+    esp32 does not match esp32c3; esp32c6 does not match esp32c61.
+    """
+    want = _normalize_chip_token(chip)
+    n = _normalize_chip_token(name)
+    if not want or not n.startswith(want):
+        return False
+    for known in KNOWN_CHIP_PREFIXES:
+        if len(known) > len(want) and known.startswith(want) and n.startswith(known):
+            return False
+    rest = n[len(want):]
+    # Future series (e.g. esp32c7) not yet listed above.
+    if _SERIES_SUFFIX_RE.match(rest):
+        return False
+    return True
 
 
 def _job_short_commit(job: dict[str, Any]) -> str:
@@ -340,16 +410,23 @@ def job_artifacts_size(job: dict[str, Any]) -> int | None:
     return None
 
 
-def select_job(jobs: list[dict[str, Any]]) -> dict[str, Any]:
-    jobs = filter_firmware_jobs(jobs)
+def select_job(
+    jobs: list[dict[str, Any]],
+    chip: str | None = None,
+) -> dict[str, Any]:
+    jobs = filter_firmware_jobs(jobs, chip=chip)
     if not jobs:
         _die(
             "No firmware jobs found in this pipeline "
             "(expected job names starting with 'esp')."
         )
 
+    chip_note = f", chip={chip!r}" if chip else ""
     print()
-    print(f"Found {len(jobs)} firmware job(s) (name starts with 'esp').\n")
+    print(
+        f"Found {len(jobs)} firmware job(s) "
+        f"(name starts with 'esp'{chip_note}).\n"
+    )
     sep = "-" * 81
     print(sep)
     print(
@@ -897,6 +974,10 @@ def build_parser() -> argparse.ArgumentParser:
             "      Use the latest successful pipeline on another branch\n"
             "      instead of the default master.\n"
             "\n"
+            "  at-download-gl.py -c esp32c5\n"
+            "      Only list firmware jobs for that chip (exact: esp32 does\n"
+            "      not match esp32c3; esp32c6 does not match esp32c61).\n"
+            "\n"
             f"  at-download-gl.py -u {PIPELINE_WEB_PREFIX}/352799\n"
             "      Download from a specific pipeline (interactive job pick).\n"
             "      A bare numeric id is treated as a pipeline id.\n"
@@ -908,6 +989,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "-B", "--branch", default=DEFAULT_BRANCH,
         help=f"Branch for latest successful pipeline (default: {DEFAULT_BRANCH})",
+    )
+    p.add_argument(
+        "-c", "--chip", metavar="CHIP",
+        help=(
+            "Filter firmware jobs by chip (exact: esp32, esp32c3, esp32c5, ...; "
+            "esp32 does not match esp32c3)"
+        ),
     )
     p.add_argument(
         "-p", "--port",
@@ -967,6 +1055,11 @@ def main(argv: list[str] | None = None) -> int:
             status = job.get("status") or ""
             if status and status != "success":
                 _warn(f"Job status is '{status}' (expected success); continuing.")
+            if args.chip and not name_matches_chip(job.get("name") or "", args.chip):
+                _die(
+                    f"Job {job.get('name')!r} does not match chip "
+                    f"{args.chip!r} from --chip."
+                )
         else:
             _info(f"Using pipeline from --url (id={entity_id})")
             pipeline = get_pipeline(token, entity_id)
@@ -979,7 +1072,7 @@ def main(argv: list[str] | None = None) -> int:
             web = pipeline.get("web_url") or f"{PIPELINE_WEB_PREFIX}/{entity_id}"
             _info(f"GitLab pipeline: {web}")
             jobs = list_jobs_for_pipeline(token, entity_id)
-            job = select_job(jobs)
+            job = select_job(jobs, chip=args.chip)
     else:
         _info(f"Using branch: {args.branch}")
         _info("Looking up latest successful GitLab pipeline...")
@@ -994,7 +1087,7 @@ def main(argv: list[str] | None = None) -> int:
         web = pipeline.get("web_url") or f"{PIPELINE_WEB_PREFIX}/{pipeline_id}"
         _info(f"GitLab pipeline: {web}")
         jobs = list_jobs_for_pipeline(token, pipeline_id)
-        job = select_job(jobs)
+        job = select_job(jobs, chip=args.chip)
 
     job_id = int(job["id"])
     job_name = job.get("name") or "?"
