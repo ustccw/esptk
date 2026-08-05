@@ -19,6 +19,8 @@ Examples:
       Same as above (port /dev/ttyUSB0), but keep zip/bin in memory only.
   at-download-gh.py -B release/v2.3.0.0_esp8266
       Use the latest successful build on another branch instead of master.
+  at-download-gh.py -c esp32c5
+      Only list artifacts for that chip (esp32 does not match esp32c3).
   at-download-gh.py -u https://github.com/espressif/esp-at/actions/runs/28586915579
       Download from a specific GitHub Actions run URL (skip branch lookup).
 """
@@ -63,6 +65,21 @@ RUN_URL_RE = re.compile(
     r"^https?://github\.com/([^/]+)/([^/]+)/actions/runs/(\d+)/?(?:[?#].*)?$",
     re.IGNORECASE,
 )
+# Longest-first: esp32c61 before esp32c6 before esp32.
+KNOWN_CHIP_PREFIXES = (
+    "esp32c61",
+    "esp32c6",
+    "esp32c5",
+    "esp32c3",
+    "esp32c2",
+    "esp32s3",
+    "esp32s2",
+    "esp32p4",
+    "esp32h2",
+    "esp32",
+    "esp8266",
+)
+_SERIES_SUFFIX_RE = re.compile(r"^[cshp]\d")
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +403,50 @@ def list_artifacts_for_run(token: str, run_id: int) -> dict[str, dict[str, Any]]
             break
         page += 1
     return by_name
+
+
+def _normalize_chip_token(s: str) -> str:
+    """Lowercase and strip -/_ so ESP32-C3 / esp32_c3 / esp32c3 match."""
+    return s.strip().lower().replace("_", "").replace("-", "")
+
+
+def chip_from_name(name: str) -> str | None:
+    """Best-known chip prefix embedded at the start of an artifact/job name."""
+    n = _normalize_chip_token(name)
+    for chip in KNOWN_CHIP_PREFIXES:
+        if n.startswith(chip):
+            return chip
+    return None
+
+
+def name_matches_chip(name: str, chip: str) -> bool:
+    """
+    True if name belongs to chip. Exact chip identity:
+    esp32 does not match esp32c3; esp32c6 does not match esp32c61.
+    """
+    want = _normalize_chip_token(chip)
+    n = _normalize_chip_token(name)
+    if not want or not n.startswith(want):
+        return False
+    for known in KNOWN_CHIP_PREFIXES:
+        if len(known) > len(want) and known.startswith(want) and n.startswith(known):
+            return False
+    rest = n[len(want):]
+    # Future series (e.g. esp32c7) not yet listed above.
+    if _SERIES_SUFFIX_RE.match(rest):
+        return False
+    return True
+
+
+def filter_names_by_chip(names: list[str], chip: str) -> list[str]:
+    matched = [n for n in names if name_matches_chip(n, chip)]
+    if matched:
+        return matched
+    seen = sorted({chip_from_name(n) or _normalize_chip_token(n)[:12] for n in names})
+    _die(
+        f"No artifact matching chip {chip!r}. "
+        f"Seen chip prefixes: {', '.join(seen) or '(none)'}"
+    )
 
 
 def select_artifact(
@@ -860,6 +921,10 @@ def build_parser() -> argparse.ArgumentParser:
             "      Use the latest successful build on another branch\n"
             "      instead of the default master.\n"
             "\n"
+            "  at-download-gh.py -c esp32c5\n"
+            "      Only list artifacts for that chip (exact: esp32 does not\n"
+            "      match esp32c3; esp32c6 does not match esp32c61).\n"
+            "\n"
             f"  at-download-gh.py -u https://github.com/{REPO}/actions/runs/28586915579\n"
             "      Download from a specific GitHub Actions run URL\n"
             "      (skip branch lookup). You can also pass a numeric run id.\n"
@@ -868,6 +933,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "-B", "--branch", default=DEFAULT_BRANCH,
         help=f"Branch for Actions artifacts (default: {DEFAULT_BRANCH})",
+    )
+    p.add_argument(
+        "-c", "--chip", metavar="CHIP",
+        help=(
+            "Filter artifacts by chip (exact: esp32, esp32c3, esp32c5, ...; "
+            "esp32 does not match esp32c3)"
+        ),
     )
     p.add_argument(
         "-p", "--port",
@@ -935,6 +1007,11 @@ def main(argv: list[str] | None = None) -> int:
     artifacts = list_artifacts_for_run(token, run_id)
     artifact_names = sorted(artifacts.keys())
     _info(f"Found {len(artifact_names)} artifact(s).")
+    if args.chip:
+        artifact_names = filter_names_by_chip(artifact_names, args.chip)
+        _info(
+            f"Chip filter {args.chip!r}: {len(artifact_names)} artifact(s) left."
+        )
 
     art = select_artifact(artifact_names, artifacts)
     name = art["name"]
