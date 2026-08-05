@@ -2,7 +2,8 @@
 """
 Find local esp-at firmware and optionally flash a device.
 
-Standalone (Python 3 stdlib only). Flashing needs esptool / esptool.py on PATH.
+Standalone (Python 3 stdlib for scan/select). Flashing needs esptool
+(see requirements.txt: pip install esptool).
 
 Searches recursively for complete flashable images (bootloader + partition
 table) under the current directory, ~/Downloads, and ~/$USER/share — or under
@@ -579,9 +580,14 @@ def find_esptool_cmd() -> list[str]:
     if _try_import_esptool():
         return [sys.executable, "-m", "esptool"]
     _die(
-        "esptool not found. Install with 'pip install esptool' or put "
-        "esptool / esptool.py on PATH."
+        "esptool not found. Install with 'pip install esptool' "
+        "(see requirements.txt) or put esptool / esptool.py on PATH."
     )
+
+
+def require_esptool() -> None:
+    """Fail fast before firmware work when flashing is requested."""
+    find_esptool_cmd()
 
 
 def flash_from_path(port: str, baud: int, bin_path: Path | str) -> None:
@@ -790,6 +796,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.memory and args.no_flash:
         _die("--memory/-m cannot be combined with --no-flash/-n.")
+
+    # Fail before scanning if flash was requested but esptool is missing.
+    if not args.no_flash:
+        require_esptool()
 
     cands = collect_candidates(args.path)
     _info(f"Found {len(cands)} complete firmware candidate(s).")

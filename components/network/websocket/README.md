@@ -1,7 +1,8 @@
 # Usage
 1. Install the library: [websockets](https://pypi.org/project/websockets/)
 ```
-pip install websockets
+pip install -r ../../../requirements.txt
+# or: pip install websockets
 ```
 
 2. Configurate

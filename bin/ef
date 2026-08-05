@@ -15,6 +15,9 @@ export try_counts=1
 # save error log if erase failed
 export log_file="ef_failed.log"
 
+# Prefer pip-installed `esptool`; keep `esptool.py` for older layouts.
+ESPTOOL_BIN="$(command -v esptool || command -v esptool.py || true)"
+
 function esp_erase_all_flash()
 {
     for sp in /dev/ttyUSB*
@@ -41,11 +44,11 @@ function esp_erase_one_flash()
         for((i=1;i<=$try_counts;i++));
         do {
             ESP_LOGI "Erase /dev/ttyUSB$1..."   \
-                && esptool.py --port /dev/ttyUSB$1 --baud $erase_baud erase_flash   \
+                && "$ESPTOOL_BIN" --port /dev/ttyUSB$1 --baud $erase_baud erase_flash   \
                 && ESP_LOGI "Erase /dev/ttyUSB$1 Done!" && break
             ESP_LOGW "Try again: erase /dev/ttyUSB$1 [$i/$try_counts]"
             if [ $i -eq $try_counts ]; then
-                echo "esptool.py --port /dev/ttyUSB$1 --baud $erase_baud erase_flash" >> $log_file
+                echo "$ESPTOOL_BIN --port /dev/ttyUSB$1 --baud $erase_baud erase_flash" >> $log_file
             fi
         }
         done
@@ -56,13 +59,15 @@ function esp_erase_one_flash()
 }
 
 if [ "$1" = "-h" ]; then
-    ESP_LOGB "NAME:\r\n  ef: esptool.py --port /dev/ttyUSB* --baud $erase_baud erase_flash\r\n"
+    ESP_LOGB "NAME:\r\n  ef: esptool --port /dev/ttyUSB* --baud $erase_baud erase_flash\r\n"
     ESP_LOGN "  ef : erase all flash"
     ESP_LOGN "  ef [x]: erase one flash by index 'x', such as 'ef 1' means: erase flash by /dev/ttyUSB1"
     exit
 fi
 
-whereis esptool.py | grep "esptool.py" > /dev/null || MEXIT "Please install esptool.py firstly!"
+if [ -z "$ESPTOOL_BIN" ]; then
+    MEXIT "esptool not found. Install with 'pip install esptool' (see requirements.txt)"
+fi
 
 ESP_DEL $log_file
 

@@ -2,7 +2,17 @@
 #-*- coding: utf-8 -*-
 # chenwu@espressif.com
 
-import os, sys, requests
+import os
+import sys
+
+try:
+    import requests
+except ImportError:
+    sys.stderr.write(
+        "[ERROR] requests not found. Install with "
+        "'pip install requests' (see requirements.txt).\n"
+    )
+    sys.exit(1)
 
 # GitLab API endpoint
 GITLAB_API = 'https://gitlab.espressif.cn:6688/api/v4'

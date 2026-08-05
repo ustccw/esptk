@@ -3,12 +3,13 @@
 Download esp-at firmware from GitLab CI (pipeline/job artifacts) and optionally
 flash a device.
 
-Standalone (Python 3 stdlib only). Flashing needs esptool / esptool.py on PATH.
+Standalone (Python 3 stdlib for download). Flashing needs esptool
+(see requirements.txt: pip install esptool).
 
 Prerequisites:
   1. GitLab PAT (scopes: api, read_user, read_api). File:
      ~/.esptk/gitlab_oauth_token (or ~/.gitlab_oauth_token), or env GITLAB_TOKEN.
-  2. For flashing: pip install esptool (or esptool.py on PATH).
+  2. For flashing: pip install esptool (or esptool / esptool.py on PATH).
 
 Examples:
   at-download-gl.py
@@ -781,9 +782,14 @@ def find_esptool_cmd() -> list[str]:
     if _try_import_esptool():
         return [sys.executable, "-m", "esptool"]
     _die(
-        "esptool not found. Install with 'pip install esptool' or put "
-        "esptool / esptool.py on PATH."
+        "esptool not found. Install with 'pip install esptool' "
+        "(see requirements.txt) or put esptool / esptool.py on PATH."
     )
+
+
+def require_esptool() -> None:
+    """Fail fast before download/network work when flashing is requested."""
+    find_esptool_cmd()
 
 
 def flash_from_path(port: str, baud: int, bin_path: Path | str) -> None:
@@ -1042,6 +1048,10 @@ def main(argv: list[str] | None = None) -> int:
         port = resolve_port(args.port)
     elif args.legacy_port is not None:
         port = resolve_port(args.legacy_port)
+
+    # Fail before token/network work if flash was requested but esptool is missing.
+    if port:
+        require_esptool()
 
     token, token_source = load_token(args.token_file)
     check_token(token, token_source)

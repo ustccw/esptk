@@ -4,7 +4,16 @@
 
 import asyncio
 import ssl
-import websockets
+import sys
+
+try:
+    import websockets
+except ImportError:
+    sys.stderr.write(
+        "[ERROR] websockets not found. Install with "
+        "'pip install websockets' (see requirements.txt).\n"
+    )
+    sys.exit(1)
 
 host = '192.168.200.249'
 port = 8765
