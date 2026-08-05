@@ -157,6 +157,26 @@ class SerialPortLogger:
         return False
 
     @staticmethod
+    def resolve_port(port: Optional[str]) -> Optional[str]:
+        """Normalize a port argument.
+
+        Full device paths are unchanged. A bare digit ``N`` is accepted as a
+        shortcut for ``/dev/ttyUSBN`` (``COMn`` on Windows). ``None`` stays
+        ``None`` for later auto-detect.
+        """
+        if port is None:
+            return None
+        port = str(port).strip()
+        if not port:
+            return port
+        if port.isdigit():
+            system = platform.system().lower()
+            if system == 'windows':
+                return f'COM{port}'
+            return f'/dev/ttyUSB{port}'
+        return port
+
+    @staticmethod
     def find_first_available_port() -> Optional[str]:
         """Find the first available serial port based on the operating system."""
         ports = list(serial.tools.list_ports.comports())
@@ -385,7 +405,8 @@ def create_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         '--port', '-p',
         default=None,
-        help='Serial port device. Default: the first available port.',
+        help='Serial port; full path or digit N -> /dev/ttyUSBN. '
+             'Default: the first available port.',
     )
     parser.add_argument(
         '--baudrate', '-b',
@@ -422,7 +443,9 @@ def main():
     args = parser.parse_args()
 
     logger = SerialPortLogger()
-    port = args.port or SerialPortLogger.find_first_available_port()
+    port = SerialPortLogger.resolve_port(args.port) or (
+        SerialPortLogger.find_first_available_port()
+    )
     try:
         args.port = SerialPortLogger.validate_serial_port(port)
     except ValueError as e:
