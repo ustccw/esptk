@@ -428,42 +428,46 @@ def select_job(
         f"Found {len(jobs)} firmware job(s) "
         f"(name starts with 'esp'{chip_note}).\n"
     )
-    sep = "-" * 81
-    print(sep)
-    print(
-        f"| {'idx':>3} | {'job name':<39} | {'state':^7} | "
-        f"{'commit':^7} | {'job id':>8} |"
-    )
-    print(sep)
-    for i, job in enumerate(jobs):
-        name = (job.get("name") or "?")[:39]
-        state = (job.get("status") or "?")[:7]
-        commit = _job_short_commit(job)[:7]
-        jid = str(job.get("id") or "?")
-        print(f"| {i:3d} | {name:<39} | {state:^7} | {commit:^7} | {jid:>8} |")
-    print(sep)
-    print()
 
-    try:
-        raw = input(
-            f"Select job by index "
-            f"(0-{len(jobs) - 1}, default 0): "
-        ).strip()
-    except EOFError:
-        raw = ""
-    except KeyboardInterrupt:
-        _interrupted()
-    if not raw:
-        idx = 0
+    if len(jobs) == 1:
+        job = jobs[0]
     else:
-        try:
-            idx = int(raw)
-        except ValueError:
-            _die(f"Invalid index: {raw!r}")
-    if not 0 <= idx < len(jobs):
-        _die(f"Index out of range: {idx}")
+        sep = "-" * 81
+        print(sep)
+        print(
+            f"| {'idx':>3} | {'job name':<39} | {'state':^7} | "
+            f"{'commit':^7} | {'job id':>8} |"
+        )
+        print(sep)
+        for i, job_row in enumerate(jobs):
+            name = (job_row.get("name") or "?")[:39]
+            state = (job_row.get("status") or "?")[:7]
+            commit = _job_short_commit(job_row)[:7]
+            jid = str(job_row.get("id") or "?")
+            print(f"| {i:3d} | {name:<39} | {state:^7} | {commit:^7} | {jid:>8} |")
+        print(sep)
+        print()
 
-    job = jobs[idx]
+        try:
+            raw = input(
+                f"Select job by index "
+                f"(0-{len(jobs) - 1}, default 0): "
+            ).strip()
+        except EOFError:
+            raw = ""
+        except KeyboardInterrupt:
+            _interrupted()
+        if not raw:
+            idx = 0
+        else:
+            try:
+                idx = int(raw)
+            except ValueError:
+                _die(f"Invalid index: {raw!r}")
+        if not 0 <= idx < len(jobs):
+            _die(f"Index out of range: {idx}")
+        job = jobs[idx]
+
     status = job.get("status") or ""
     if status != "success":
         _die(
