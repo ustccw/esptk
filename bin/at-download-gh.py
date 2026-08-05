@@ -23,7 +23,8 @@ Examples:
   at-download-gh.py -c esp32c5
       Only list artifacts for that chip (esp32 does not match esp32c3).
   at-download-gh.py -u https://github.com/espressif/esp-at/actions/runs/28586915579
-      Download from a specific GitHub Actions run URL (skip branch lookup).
+      Download from a specific GitHub Actions run URL (skip branch lookup;
+      owner/repo is taken from the URL, so forks work too).
 """
 
 from __future__ import annotations
@@ -47,7 +48,6 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 REPO = "espressif/esp-at"
-API_BASE = f"https://api.github.com/repos/{REPO}"
 DEFAULT_BRANCH = "master"
 DEFAULT_BAUD = 921600
 DEFAULT_TOKEN_FILES = (
@@ -325,25 +325,28 @@ def check_token(token: str, source: str) -> None:
 # Workflow run / artifacts
 # ---------------------------------------------------------------------------
 
-def parse_run_url(url_or_id: str) -> int:
+def api_base(repo: str = REPO) -> str:
+    return f"https://api.github.com/repos/{repo}"
+
+
+def parse_run_url(url_or_id: str) -> tuple[str, int]:
+    """Return (owner/repo, run_id). Bare numeric id uses default REPO."""
     s = url_or_id.strip()
     m = RUN_URL_RE.match(s)
     if m:
-        owner, repo, run_id = m.group(1), m.group(2), int(m.group(3))
-        full = f"{owner}/{repo}"
-        if full.lower() != REPO.lower():
-            _warn(f"URL points to {full}, script targets {REPO}; continuing.")
-        return run_id
+        return f"{m.group(1)}/{m.group(2)}", int(m.group(3))
     if s.isdigit():
-        return int(s)
+        return REPO, int(s)
     _die(
         f"Invalid --url value: {url_or_id!r}\n"
         f"  Expected like https://github.com/{REPO}/actions/runs/28586915579"
     )
 
 
-def get_workflow_run(token: str, run_id: int) -> dict[str, Any]:
-    return github_json(f"{API_BASE}/actions/runs/{run_id}", token)
+def get_workflow_run(
+    token: str, run_id: int, repo: str = REPO
+) -> dict[str, Any]:
+    return github_json(f"{api_base(repo)}/actions/runs/{run_id}", token)
 
 
 def is_at_firmware_run(run: dict[str, Any], branch: str) -> bool:
@@ -364,7 +367,7 @@ def find_latest_successful_run(token: str, branch: str) -> dict[str, Any]:
     query = urllib.parse.urlencode(
         {"branch": branch, "status": "success", "per_page": 10}
     )
-    data = github_json(f"{API_BASE}/actions/runs?{query}", token)
+    data = github_json(f"{api_base()}/actions/runs?{query}", token)
     for run in data.get("workflow_runs") or []:
         if is_at_firmware_run(run, branch):
             return run
@@ -379,14 +382,16 @@ def find_latest_successful_run(token: str, branch: str) -> dict[str, Any]:
     )
 
 
-def list_artifacts_for_run(token: str, run_id: int) -> dict[str, dict[str, Any]]:
+def list_artifacts_for_run(
+    token: str, run_id: int, repo: str = REPO
+) -> dict[str, dict[str, Any]]:
     """artifact_name -> newest non-expired artifact object."""
     by_name: dict[str, dict[str, Any]] = {}
     page = 1
     while page <= 5:
         query = urllib.parse.urlencode({"per_page": 100, "page": page})
         data = github_json(
-            f"{API_BASE}/actions/runs/{run_id}/artifacts?{query}", token
+            f"{api_base(repo)}/actions/runs/{run_id}/artifacts?{query}", token
         )
         arts = data.get("artifacts") or []
         if not arts:
@@ -961,7 +966,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "-u", "--url", metavar="URL",
-        help=f"Actions run URL or id, e.g. https://github.com/{REPO}/actions/runs/<id>",
+        help=(
+            "Actions run URL or id, e.g. "
+            f"https://github.com/{REPO}/actions/runs/<id> "
+            "(owner/repo taken from the URL; bare id uses espressif/esp-at)"
+        ),
     )
     p.add_argument(
         "-k", "--keyword", metavar="KEYWORD",
@@ -997,24 +1006,25 @@ def main(argv: list[str] | None = None) -> int:
     token, token_source = load_token(args.token_file)
     check_token(token, token_source)
 
+    repo = REPO
     if args.url:
-        run_id = parse_run_url(args.url)
-        _info(f"Using workflow run from --url (id={run_id})")
-        run = get_workflow_run(token, run_id)
+        repo, run_id = parse_run_url(args.url)
+        _info(f"Using workflow run from --url ({repo}, id={run_id})")
+        run = get_workflow_run(token, run_id, repo)
     else:
         _info(f"Using branch: {args.branch}")
         _info("Looking up latest successful GitHub Actions run...")
         run = find_latest_successful_run(token, args.branch)
         run_id = int(run["id"])
 
-    run_url = f"https://github.com/{REPO}/actions/runs/{run_id}"
+    run_url = f"https://github.com/{repo}/actions/runs/{run_id}"
     title = run.get("display_title") or run.get("name") or "?"
     _info(f"Workflow: {run.get('name', '?')} — {title}")
     _info(f"GitHub Actions: {run_url}")
     _info(f"Created: {run.get('created_at', '?')}")
 
     _info("Fetching artifacts for this run...")
-    artifacts = list_artifacts_for_run(token, run_id)
+    artifacts = list_artifacts_for_run(token, run_id, repo)
     artifact_names = sorted(artifacts.keys())
     _info(f"Found {len(artifact_names)} artifact(s).")
     if args.chip:
