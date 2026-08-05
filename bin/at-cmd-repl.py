@@ -307,10 +307,32 @@ class AtCmdRepl:
         return [p.device for p in ports]
 
     @staticmethod
+    def resolve_port(port: Optional[str]) -> Optional[str]:
+        """Normalize a port argument.
+
+        Full device paths are unchanged. A bare digit ``N`` is accepted as a
+        shortcut for ``/dev/ttyUSBN`` (``COMn`` on Windows). ``None`` stays
+        ``None`` for later auto-detect.
+        """
+        if port is None:
+            return None
+        port = str(port).strip()
+        if not port:
+            return port
+        if port.isdigit():
+            system = platform.system().lower()
+            if system == 'windows':
+                return f'COM{port}'
+            return f'/dev/ttyUSB{port}'
+        return port
+
+    @staticmethod
     def resolve_ports(
         port0: Optional[str], port1: Optional[str]
     ) -> Tuple[Optional[str], Optional[str]]:
         """Resolve AT log / command ports from args or auto-detect."""
+        port0 = AtCmdRepl.resolve_port(port0)
+        port1 = AtCmdRepl.resolve_port(port1)
         if port0 is not None and port1 is not None:
             return port0, port1
 
@@ -808,12 +830,14 @@ def create_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         '--port0', '-p0',
         default=None,
-        help='AT log port device. Default: smallest candidate port.',
+        help='AT log port; full path or digit N -> /dev/ttyUSBN. '
+             'Default: smallest candidate port.',
     )
     parser.add_argument(
         '--port1', '-p1',
         default=None,
-        help='AT command port device. Default: second-smallest candidate (or same if only one).',
+        help='AT command port; full path or digit N -> /dev/ttyUSBN. '
+             'Default: second-smallest candidate (or same if only one).',
     )
     parser.add_argument(
         '--port0-baudrate', '-p0b',

@@ -1819,17 +1819,18 @@ def create_argument_parser() -> argparse.ArgumentParser:
         type=parse_dut_arg,
         metavar='NAME=LOG,CMD',
         help='Register/override a DUT. Repeatable. '
-             'Example: AT1=/dev/ttyUSB0,/dev/ttyUSB1',
+             'Example: AT1=/dev/ttyUSB0,/dev/ttyUSB1 or AT1=0,1',
     )
     parser.add_argument(
         '--port0', '-p0',
         default=None,
-        help='Single-DUT log port (alias for --dut AT1=LOG,CMD with -p1).',
+        help='Single-DUT log port (alias for --dut AT1=LOG,CMD with -p1); '
+             'full path or digit N -> /dev/ttyUSBN.',
     )
     parser.add_argument(
         '--port1', '-p1',
         default=None,
-        help='Single-DUT command port.',
+        help='Single-DUT command port; full path or digit N -> /dev/ttyUSBN.',
     )
     parser.add_argument(
         '--baudrate', '-b',
