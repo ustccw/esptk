@@ -51,7 +51,6 @@ function SHOW_FEATURES()
 
     ESP_LOGN "at-download-gh:\tDownload the latest esp-at firmware from github and burn into chip"
     ESP_LOGN "at-download-gl:\tDownload the esp-at firmware from gitlab and burn into chip"
-    ESP_LOGN "at-released:\tDownload the released esp-at firmware"
     ESP_LOGN "at-download-local:\tUnzip the artifacts and burn into chip"
     ESP_LOGN ""
 
