@@ -1,1 +1,14 @@
+# Python dependencies for esptk tools.
+# Install: pip install -r requirements.txt
+
+# pyserial — at-cmd-repl.py, esp-logger.py, at-test.py
 pyserial
+
+# requests — at-retry-pipeline.py
+requests
+
+# esptool — at-download-gl.py, at-download-gh.py, at-download-local.py, ef
+esptool
+
+# websockets — components/network/websocket/ws-server.py, wss-server.py
+websockets

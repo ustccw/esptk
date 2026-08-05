@@ -18,8 +18,15 @@ import time
 from datetime import datetime
 from typing import Optional, TextIO
 
-import serial
-import serial.tools.list_ports
+try:
+    import serial
+    import serial.tools.list_ports
+except ImportError:
+    sys.stderr.write(
+        "[ERROR] pyserial not found. Install with "
+        "'pip install pyserial' (see requirements.txt).\n"
+    )
+    sys.exit(1)
 
 try:
     import fcntl

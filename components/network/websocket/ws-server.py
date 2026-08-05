@@ -3,7 +3,16 @@
 # chenwu@espressif.com
 
 import asyncio
-from websockets.server import serve
+import sys
+
+try:
+    from websockets.server import serve
+except ImportError:
+    sys.stderr.write(
+        "[ERROR] websockets not found. Install with "
+        "'pip install websockets' (see requirements.txt).\n"
+    )
+    sys.exit(1)
 
 host = "192.168.200.249"
 port = 8765

@@ -13,6 +13,12 @@ esptk is Free Software under a MIT license.
 source install.sh
 ```
 
+Or install Python dependencies only:
+
+```
+pip install -r requirements.txt
+```
+
 # Environment Setup
 
 After installation, add `esptk/bin` to your PATH permanently by adding the following line to your shell configuration file:
