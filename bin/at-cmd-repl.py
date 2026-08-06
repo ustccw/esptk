@@ -358,31 +358,23 @@ class AtCmdRepl:
     def resolve_ports(
         port0: Optional[str], port1: Optional[str]
     ) -> Tuple[Optional[str], Optional[str]]:
-        """Resolve AT log / command ports from args or auto-detect."""
+        """Resolve AT log / command ports from args or auto-detect.
+
+        If only one of ``port0`` / ``port1`` is set, the other stays ``None``
+        (single-role mode — do not auto-fill or touch the unset UART).
+        Auto-detect runs only when both are unset.
+        """
         port0 = AtCmdRepl.resolve_port(port0)
         port1 = AtCmdRepl.resolve_port(port1)
-        if port0 is not None and port1 is not None:
+        if port0 is not None or port1 is not None:
             return port0, port1
 
         candidates = AtCmdRepl.find_candidate_ports()
         if not candidates:
-            return port0, port1
-
-        if port0 is None and port1 is None:
-            if len(candidates) == 1:
-                return candidates[0], candidates[0]
-            return candidates[0], candidates[1]
-
-        if port0 is None:
-            for c in candidates:
-                if c != port1:
-                    return c, port1
-            return port1, port1
-
-        for c in candidates:
-            if c != port0:
-                return port0, c
-        return port0, port0
+            return None, None
+        if len(candidates) == 1:
+            return candidates[0], candidates[0]
+        return candidates[0], candidates[1]
 
     @staticmethod
     def validate_serial_port(port: Optional[str]) -> str:
@@ -498,7 +490,9 @@ class AtCmdRepl:
 
     def _open_serials(self) -> bool:
         """Open log/cmd serial ports. Returns True on success."""
-        self._same_port = self.port0 == self.port1
+        self._same_port = (
+            self.port0 is not None and self.port1 is not None and self.port0 == self.port1
+        )
         try:
             if self._same_port:
                 ser = serial.Serial(
@@ -515,24 +509,28 @@ class AtCmdRepl:
                     + (' flow-control' if self.flow_control else '')
                 )
             else:
-                log_ser = serial.Serial(
-                    self.port0, self.port0_baudrate, timeout=0, rtscts=False
-                )
-                self._lock_port(log_ser, 'log')
-                cmd_ser = serial.Serial(
-                    self.port1,
-                    self.port1_baudrate,
-                    timeout=0,
-                    rtscts=self.flow_control,
-                )
-                self._lock_port(cmd_ser, 'cmd')
-                self.log_serial = log_ser
-                self.cmd_serial = cmd_ser
-                self.log_info(f'Opened log port {self.port0} @ {self.port0_baudrate}')
-                self.log_info(
-                    f'Opened cmd port {self.port1} @ {self.port1_baudrate}'
-                    + (' flow-control' if self.flow_control else '')
-                )
+                if self.port0 is not None:
+                    log_ser = serial.Serial(
+                        self.port0, self.port0_baudrate, timeout=0, rtscts=False
+                    )
+                    self._lock_port(log_ser, 'log')
+                    self.log_serial = log_ser
+                    self.log_info(
+                        f'Opened log port {self.port0} @ {self.port0_baudrate}'
+                    )
+                if self.port1 is not None:
+                    cmd_ser = serial.Serial(
+                        self.port1,
+                        self.port1_baudrate,
+                        timeout=0,
+                        rtscts=self.flow_control,
+                    )
+                    self._lock_port(cmd_ser, 'cmd')
+                    self.cmd_serial = cmd_ser
+                    self.log_info(
+                        f'Opened cmd port {self.port1} @ {self.port1_baudrate}'
+                        + (' flow-control' if self.flow_control else '')
+                    )
             return True
         except Exception as e:
             self._close_serials()
@@ -1093,13 +1091,17 @@ class AtCmdRepl:
             'Hotkeys: arrows/Home/End edit the line; Ctrl+Left/Right jump words; '
             'Ctrl+A/E home/end; Ctrl+K/U/W kill; Ctrl+R reset chip; Ctrl+C exit'
         )
-        if self.port0 == self.port1:
+        if self.port0 is not None and self.port1 is not None and self.port0 == self.port1:
             self.log_info(f'Using shared port for log+cmd: {self.port0}')
             if self.port0_baudrate != self.port1_baudrate:
                 self.log_warn(
                     f'Same port: using cmd baudrate {self.port1_baudrate} '
                     f'(ignoring log baudrate {self.port0_baudrate})'
                 )
+        elif self.port0 is not None and self.port1 is None:
+            self.log_info(f'Log port only: {self.port0}')
+        elif self.port0 is None and self.port1 is not None:
+            self.log_info(f'Cmd port only: {self.port1}')
         else:
             self.log_info(f'Log port: {self.port0}  Cmd port: {self.port1}')
 
@@ -1121,7 +1123,11 @@ class AtCmdRepl:
             first_reconnect = True
             reconnect_delay = 0.5
 
-            if not self.no_reboot_chip and not has_reset:
+            if (
+                not self.no_reboot_chip
+                and not has_reset
+                and self.port0 is not None
+            ):
                 self.reset_esp_chip()
                 has_reset = True
 
@@ -1163,13 +1169,16 @@ def create_argument_parser() -> argparse.ArgumentParser:
         '--port0', '-p0',
         default=None,
         help='AT log port; full path or digit N -> /dev/ttyUSBN. '
-             'Default: smallest candidate port.',
+             'Omit with -p1 set to leave the log UART unused. '
+             'If neither -p0 nor -p1 is set: auto-detect (smallest candidate).',
     )
     parser.add_argument(
         '--port1', '-p1',
         default=None,
         help='AT command port; full path or digit N -> /dev/ttyUSBN. '
-             'Default: second-smallest candidate (or same if only one).',
+             'Omit with -p0 set to leave the command UART unused. '
+             'If neither -p0 nor -p1 is set: auto-detect '
+             '(second-smallest candidate, or same if only one).',
     )
     parser.add_argument(
         '--port0-baudrate', '-p0b',
@@ -1217,9 +1226,16 @@ def main():
 
     repl = AtCmdRepl()
     port0, port1 = AtCmdRepl.resolve_ports(args.port0, args.port1)
+    if port0 is None and port1 is None:
+        repl.log_error('No available serial port found')
+        sys.exit(1)
     try:
-        args.port0 = AtCmdRepl.validate_serial_port(port0)
-        args.port1 = AtCmdRepl.validate_serial_port(port1)
+        args.port0 = (
+            AtCmdRepl.validate_serial_port(port0) if port0 is not None else None
+        )
+        args.port1 = (
+            AtCmdRepl.validate_serial_port(port1) if port1 is not None else None
+        )
     except ValueError as e:
         repl.log_error(str(e))
         sys.exit(1)
