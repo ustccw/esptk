@@ -1439,9 +1439,17 @@ class AtContext:
                         f'expect not matched: {patterns!r}',
                         device_failed=saw_terminator in _AT_FAIL_LINES,
                     )
-                # OK arrived but non-terminator patterns still pending
-                # (e.g. AT+CIPSEND → OK then '>').
-                continue
+                # OK arrived but non-terminator patterns still pending.
+                # Only keep waiting for post-OK prompt (AT+CIPSEND → OK then '>').
+                # Otherwise URC/body lines come *before* OK; waiting out timeout
+                # cannot help (e.g. expect [+CIPFWVER:, OK] but device only OK).
+                if accept_prompt:
+                    continue
+                raise StepFailed(
+                    f'device returned {saw_terminator}; '
+                    f'expect not matched: {patterns!r}',
+                    device_failed=False,
+                )
 
             if accept_prompt and saw_prompt and not patterns:
                 return saw_terminator
