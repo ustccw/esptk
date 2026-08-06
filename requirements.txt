@@ -7,7 +7,7 @@ pyserial
 # requests — at-retry-pipeline.py
 requests
 
-# esptool — at-download-gl.py, at-download-gh.py, at-download-local.py, ef
+# esptool — at-download-gl.py, at-download-gh.py, at-download-local.py, ef, unlock-flash.py
 esptool
 
 # websockets — components/network/websocket/ws-server.py, wss-server.py

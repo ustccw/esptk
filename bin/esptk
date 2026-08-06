@@ -32,6 +32,7 @@ function SHOW_FEATURES()
     ESP_LOGN "cmmc:\tidf.py menuconfig"
     ESP_LOGN "cmfm:\tidf.py flash monitor"
     ESP_LOGN "ef:\tesptool.py erase_flash"
+    ESP_LOGN "unlock-flash.py:\tQuery flash status (-s) or reset flash (-r)"
     ESP_LOGN ""
 
     ESP_LOGN "gitcc:\tgit resposity clean"
