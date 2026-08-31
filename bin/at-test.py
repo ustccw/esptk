@@ -44,7 +44,14 @@ Common ``dut.at`` / ``ctx.at`` arguments: ``cmd``, ``expect`` (default ``OK``),
 
 Expect specs: exact string, or ``re.compile(...)`` (use regex for substring
 matches as well). For cross-DUT races use ``mark = dut.mark()`` then
-``dut.expect(..., after=mark)``.
+``dut.expect(..., after=mark)``. Marks survive UART history truncation
+(``dut.history_since(mark)``).
+
+Waiting without sending::
+
+    ctx.wait_ready()                 # next ``ready`` (default 5s)
+    ctx.wait('WIFI GOT IP')          # next exact line / URC
+    ctx.wait_ready_got_ip()          # ready then WIFI GOT IP (reboot helper)
 
 See ``bin/examples/README.md`` / ``README_CN.md`` for full usage. ``at-test.py -h``
 for CLI options.
@@ -470,6 +477,8 @@ class AtDevice:
         self.at_ready = False
         self._line_history: List[Tuple[str, str]] = []  # (port, stripped_line)
         self._history_limit = 5000
+        # Absolute lines discarded from the front; marks are absolute indices.
+        self._history_dropped = 0
 
     # -- tagging ------------------------------------------------------------
 
@@ -654,17 +663,25 @@ class AtDevice:
         if not stripped and not line:
             return
         self._line_history.append((which, stripped))
-        if len(self._line_history) > self._history_limit:
-            self._line_history = self._line_history[-self._history_limit :]
+        overflow = len(self._line_history) - self._history_limit
+        if overflow > 0:
+            del self._line_history[:overflow]
+            self._history_dropped += overflow
         if stripped.lower() == 'ready':
             self.at_ready = True
 
     def clear_history(self) -> None:
         self._line_history.clear()
+        self._history_dropped = 0
 
     def mark(self) -> int:
-        """Snapshot ``_line_history`` length for later ``expect(..., after=mark)``."""
-        return len(self._line_history)
+        """Absolute history cursor for ``expect(..., after=mark)`` / ``history_since``."""
+        return self._history_dropped + len(self._line_history)
+
+    def history_since(self, mark: int) -> List[Tuple[str, str]]:
+        """Lines at/after absolute ``mark``, surviving history truncation."""
+        local = max(0, mark - self._history_dropped)
+        return self._line_history[local:]
 
     def drain_once(self) -> None:
         if self._same_port:
@@ -849,6 +866,66 @@ class AtDevice:
         else:
             time.sleep(seconds)
 
+    def wait(
+        self,
+        pattern: ExpectSpec,
+        timeout: Optional[float] = None,
+        expect_port: str = 'any',
+        name: Optional[str] = None,
+        after: Optional[int] = None,
+        expect_fail: bool = False,
+    ) -> StepResult:
+        """Wait for UART text/URC without sending a command.
+
+        ``pattern``: exact line ``str``, ``re.compile(...)``, ``Contains`` /
+        ``contains(...)``, or a list of those. Default ``expect_port='any'``.
+        """
+        return self.expect(
+            pattern,
+            timeout=timeout,
+            expect_port=expect_port,
+            name=name,
+            after=after,
+            expect_fail=expect_fail,
+        )
+
+    def wait_ready(
+        self,
+        timeout: float = 5.0,
+        name: str = 'wait_ready',
+        after: Optional[int] = None,
+    ) -> StepResult:
+        """Wait for the next AT ``ready`` (post-boot)."""
+        if after is None:
+            after = self.mark()
+        return self.wait(
+            re.compile(r'(?i)^ready$'),
+            timeout=timeout,
+            expect_port='any',
+            after=after,
+            name=name,
+        )
+
+    def wait_ready_got_ip(
+        self,
+        ready_timeout: float = 5.0,
+        got_ip_timeout: float = 10.0,
+        name: str = 'boot',
+    ) -> None:
+        """After DUT reboot: ``wait_ready`` then ``wait('WIFI GOT IP')``."""
+        mark = self.mark()
+        self.wait_ready(
+            timeout=ready_timeout,
+            after=mark,
+            name=f'{name}_ready',
+        )
+        self.wait(
+            'WIFI GOT IP',
+            timeout=got_ip_timeout,
+            after=mark,
+            name=f'{name}_got_ip',
+        )
+
 
 # ---------------------------------------------------------------------------
 # Expect helpers
@@ -1024,6 +1101,18 @@ class AtContext:
     def expect(self, *args, **kwargs) -> StepResult:
         return self._default_dut().expect(*args, **kwargs)
 
+    def wait(self, *args, **kwargs) -> StepResult:
+        """Wait for UART text/URC without sending. See ``AtDevice.wait``."""
+        return self._default_dut().wait(*args, **kwargs)
+
+    def wait_ready(self, *args, **kwargs) -> StepResult:
+        """Wait for the next AT ``ready``. See ``AtDevice.wait_ready``."""
+        return self._default_dut().wait_ready(*args, **kwargs)
+
+    def wait_ready_got_ip(self, *args, **kwargs) -> None:
+        """After DUT reboot: ready then ``WIFI GOT IP``."""
+        return self._default_dut().wait_ready_got_ip(*args, **kwargs)
+
     def reset(self, name: Optional[str] = None) -> None:
         if name:
             self.dut(name).reset()
@@ -1177,7 +1266,7 @@ class AtContext:
 
         try:
             call_hook(setup, self, dut, 'setup')
-            hist_start = len(dut._line_history)
+            hist_start = dut.mark()
             payload = (cmd if cmd.endswith('\r\n') else cmd + '\r\n').encode('utf-8')
             self.logger.log_info(f'{step_name} >>> {cmd}')
             dut.write_cmd(payload)
@@ -1253,7 +1342,7 @@ class AtContext:
 
         try:
             call_hook(setup, self, dut, 'setup')
-            hist_start = len(dut._line_history)
+            hist_start = dut.mark()
             self.logger.log_info(f'{step_name} >>> raw {len(data)} bytes')
             dut.write_cmd(data)
             if patterns or wait_terminator:
@@ -1320,9 +1409,9 @@ class AtContext:
         device_failed = False
         matched_device_failure = False
         if after is None:
-            hist_start = len(dut._line_history)
+            hist_start = dut.mark()
         else:
-            hist_start = max(0, min(after, len(dut._line_history)))
+            hist_start = max(0, after)
 
         try:
             self._wait_response(
@@ -1361,9 +1450,9 @@ class AtContext:
         hist_start: int,
         port_filter: str,
     ) -> List[str]:
-        """Lines from ``hist_start`` onward, filtered by expect_port."""
+        """Lines from absolute ``hist_start`` onward, filtered by expect_port."""
         out: List[str] = []
-        for which, line in dut._line_history[hist_start:]:
+        for which, line in dut.history_since(hist_start):
             if port_filter == 'cmd' and which != 'cmd':
                 continue
             if port_filter == 'log' and which != 'log':
