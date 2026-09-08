@@ -57,10 +57,7 @@ function SHOW_FEATURES()
     ESP_LOGN "at-cmd-repl.py:\tInteractive dual-port AT command REPL"
     ESP_LOGN ""
 
-    ESP_LOGN "kp:\tKill the particular port"
-    ESP_LOGN "kt:\tKill the task by keyword"
-    ESP_LOGN "st:\tSee the task by keyword"
-    ESP_LOGN "sp:\tSee the particular port"
+    ESP_LOGN "px:\tList or kill processes by keyword, port, or device"
     ESP_LOGN "cp-img:\tCopy the image file to the clipboard"
     ESP_LOGN "cusb:\tchmod 777 /dev/ttyUSB*"
     ESP_LOGN "susb:\tSee the /dev/ttyUSB* device"

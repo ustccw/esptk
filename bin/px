@@ -1,0 +1,740 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# chenwu@espressif.com
+"""
+List or kill processes by keyword, TCP/UDP port, or device file.
+
+Replaces st / sp / kt / kp.
+
+Examples:
+  px python              list processes matching 'python'
+  px USB0                list processes holding /dev/ttyUSB0
+  px -p 8080             list processes using port 8080
+  px python -k          list, then confirm SIGTERM
+  px USB0 -k            kill the occupier of /dev/ttyUSB0
+  px -p 8080 -k -f      list, then confirm SIGKILL
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import pwd
+import re
+import shlex
+import signal
+import stat as statmod
+import subprocess
+import sys
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, NoReturn
+
+PROC = Path("/proc")
+CMD_MAX = 160
+_PID_RE = re.compile(r"pid=(\d+)")
+_LOCAL_PORT_RE = re.compile(r":(\d+)\s+\S+")
+
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+
+def _color_enabled(stream: Any) -> bool:
+    return (not os.environ.get("NO_COLOR")
+            and hasattr(stream, "isatty")
+            and stream.isatty())
+
+
+def _c(code: str, text: str, *, stream: Any = sys.stdout) -> str:
+    if not _color_enabled(stream):
+        return text
+    return f"\033[{code}m{text}\033[0m"
+
+
+def _info(msg: str) -> None:
+    print(f"{_c('1;32', '[INFO]')} {msg}", flush=True)
+
+
+def _warn(msg: str) -> None:
+    print(f"{_c('1;33', '[WARN]', stream=sys.stderr)} {msg}",
+          file=sys.stderr, flush=True)
+
+
+def _error(msg: str) -> None:
+    print(f"{_c('1;31', '[ERROR]', stream=sys.stderr)} {msg}",
+          file=sys.stderr, flush=True)
+
+
+def _die(msg: str, code: int = 1) -> NoReturn:
+    _error(msg)
+    raise SystemExit(code)
+
+
+# ---------------------------------------------------------------------------
+# /proc helpers
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Proc:
+    pid: int
+    user: str
+    cpu: float
+    mem: float
+    state: str
+    command: str
+    ports: list[int] = field(default_factory=list)
+    devices: list[str] = field(default_factory=list)
+
+
+def _read_text(path: Path) -> str | None:
+    try:
+        return path.read_text(errors="replace")
+    except (OSError, ProcessLookupError):
+        return None
+
+
+def _read_bytes(path: Path) -> bytes | None:
+    try:
+        return path.read_bytes()
+    except (OSError, ProcessLookupError):
+        return None
+
+
+def _mem_total_kb() -> int:
+    text = _read_text(PROC / "meminfo") or ""
+    for line in text.splitlines():
+        if line.startswith("MemTotal:"):
+            return int(line.split()[1])
+    return 0
+
+
+def _uptime_s() -> float:
+    text = _read_text(PROC / "uptime") or "0"
+    return float(text.split()[0])
+
+
+def _clk_tck() -> int:
+    return os.sysconf(os.sysconf_names["SC_CLK_TCK"])
+
+
+def _username(uid: int) -> str:
+    try:
+        return pwd.getpwuid(uid).pw_name
+    except KeyError:
+        return str(uid)
+
+
+def _parse_status(text: str) -> tuple[int, str, int]:
+    uid = 0
+    state = "?"
+    rss_kb = 0
+    for line in text.splitlines():
+        if line.startswith("Uid:"):
+            uid = int(line.split()[1])
+        elif line.startswith("State:"):
+            parts = line.split()
+            state = parts[1] if len(parts) > 1 else "?"
+        elif line.startswith("VmRSS:"):
+            rss_kb = int(line.split()[1])
+    return uid, state, rss_kb
+
+
+def _cpu_pct(stat_text: str, uptime: float, clk: int) -> float:
+    rparen = stat_text.rfind(")")
+    if rparen < 0:
+        return 0.0
+    rest = stat_text[rparen + 2:].split()
+    if len(rest) < 22:
+        return 0.0
+    utime = int(rest[11])
+    stime = int(rest[12])
+    starttime = int(rest[19])
+    elapsed = uptime - (starttime / clk)
+    if elapsed <= 0:
+        return 0.0
+    return 100.0 * (utime + stime) / clk / elapsed
+
+
+def _cmdline(pid: int, comm: str) -> str:
+    raw = _read_bytes(PROC / str(pid) / "cmdline")
+    if not raw:
+        return f"[{comm}]"
+    return raw.replace(b"\x00", b" ").decode("utf-8", "replace").strip() or f"[{comm}]"
+
+
+def _iter_pids() -> list[int]:
+    pids: list[int] = []
+    try:
+        for name in os.listdir(PROC):
+            if name.isdigit():
+                pids.append(int(name))
+    except OSError:
+        pass
+    pids.sort()
+    return pids
+
+
+def _self_and_ancestors() -> set[int]:
+    """PIDs of this process and its parents (do not list/kill our own shell)."""
+    skip = {os.getpid()}
+    pid = os.getppid()
+    seen: set[int] = set()
+    while pid > 1 and pid not in seen:
+        skip.add(pid)
+        seen.add(pid)
+        stat = _read_text(PROC / str(pid) / "stat")
+        if not stat:
+            break
+        rparen = stat.rfind(")")
+        rest = stat[rparen + 2 :].split()
+        if len(rest) < 2:
+            break
+        pid = int(rest[1])
+    return skip
+
+
+def collect_proc(pid: int, *, uptime: float, clk: int, mem_total: int) -> Proc | None:
+    base = PROC / str(pid)
+    comm = (_read_text(base / "comm") or "").strip()
+    status = _read_text(base / "status")
+    stat = _read_text(base / "stat")
+    if status is None or stat is None:
+        return None
+    uid, state, rss_kb = _parse_status(status)
+    mem = (100.0 * rss_kb / mem_total) if mem_total else 0.0
+    return Proc(
+        pid=pid,
+        user=_username(uid),
+        cpu=_cpu_pct(stat, uptime, clk),
+        mem=mem,
+        state=state,
+        command=_cmdline(pid, comm or str(pid)),
+    )
+
+
+def matches_keyword(proc: Proc, keyword: str) -> bool:
+    comm = (_read_text(PROC / str(proc.pid) / "comm") or "").strip()
+    return keyword in comm or keyword in proc.command
+
+
+# ---------------------------------------------------------------------------
+# Ports via ss / lsof
+# ---------------------------------------------------------------------------
+
+def _run(cmd: list[str]) -> subprocess.CompletedProcess[str] | None:
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        return None
+
+
+def _ss(extra: list[str]) -> str | None:
+    proc = _run(["ss", "-H", *extra])
+    if proc is None:
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout
+
+
+def _parse_ss_pids(stdout: str) -> set[int]:
+    pids: set[int] = set()
+    for line in stdout.splitlines():
+        pids.update(int(m) for m in _PID_RE.findall(line))
+    return pids
+
+
+def _parse_ss_listen_ports(stdout: str) -> dict[int, set[int]]:
+    by_pid: dict[int, set[int]] = {}
+    for line in stdout.splitlines():
+        pids = [int(m) for m in _PID_RE.findall(line)]
+        if not pids:
+            continue
+        m = _LOCAL_PORT_RE.search(line)
+        if not m:
+            continue
+        port = int(m.group(1))
+        for pid in pids:
+            by_pid.setdefault(pid, set()).add(port)
+    return by_pid
+
+
+def listening_ports_by_pid() -> dict[int, list[int]]:
+    # TCP listening sockets only (skip UDP UNCONN noise)
+    out = _ss(["-ltnp"])
+    if not out:
+        return {}
+    return {pid: sorted(ports) for pid, ports in _parse_ss_listen_ports(out).items()}
+
+
+def pids_on_port(port: int) -> set[int]:
+    out = _ss(["-tulpn", f"sport = :{port}"])
+    if out is not None:
+        pids = _parse_ss_pids(out)
+        if not pids and out.strip():
+            _warn(f"port {port} is in use but process info is hidden; try sudo")
+        return pids
+
+    lsof_pids = _lsof_pids(port)
+    if lsof_pids is None:
+        _die("neither ss nor lsof is available; install iproute2 or lsof")
+    return lsof_pids
+
+
+def _lsof_pids(port: int) -> set[int] | None:
+    proc = _run(["lsof", "-nP", "-t", f"-i:{port}"])
+    if proc is None:
+        return None
+    if proc.returncode not in (0, 1):
+        return set()
+    pids: set[int] = set()
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if line.isdigit():
+            pids.add(int(line))
+    return pids
+
+
+def _format_ports(ports: list[int]) -> str:
+    if not ports:
+        return ""
+    shown = ports[:4]
+    extra = len(ports) - len(shown)
+    body = ",".join(f":{p}" for p in shown)
+    if extra:
+        body += f"+{extra}"
+    return f"  [{body}]"
+
+
+def _format_devs(devices: list[str]) -> str:
+    if not devices:
+        return ""
+    shown = [Path(d).name for d in devices[:4]]
+    extra = len(devices) - len(shown)
+    body = ",".join(shown)
+    if extra:
+        body += f"+{extra}"
+    return f"  [{body}]"
+
+
+# ---------------------------------------------------------------------------
+# Device files (/dev/ttyUSB0, USB0, ...)
+# ---------------------------------------------------------------------------
+
+_DEV_HINT_RE = re.compile(r"(?:^tty|(?:usb|acm)\d*$)", re.I)
+
+
+def _looks_like_dev(keyword: str) -> bool:
+    if keyword.startswith("/dev/") or os.sep in keyword:
+        return True
+    if keyword.lower().startswith("tty"):
+        return True
+    if (Path("/dev") / keyword).exists() or (Path("/dev") / f"tty{keyword}").exists():
+        return True
+    return bool(_DEV_HINT_RE.search(keyword))
+
+
+def resolve_dev_nodes(keyword: str) -> list[Path]:
+    """Map USB0 / ttyUSB0 / /dev/ttyUSB0 to existing char devices."""
+    found: list[Path] = []
+    seen: set[str] = set()
+
+    def add(path: Path) -> None:
+        try:
+            real = path.resolve()
+            mode = real.stat().st_mode
+        except OSError:
+            return
+        if not statmod.S_ISCHR(mode):
+            return
+        key = str(real)
+        if key not in seen:
+            seen.add(key)
+            found.append(real)
+
+    raw = Path(keyword)
+    if keyword.startswith("/dev/") or os.sep in keyword:
+        if raw.exists():
+            add(raw)
+        elif raw.parent.is_dir():
+            for p in raw.parent.glob(raw.name + "*"):
+                add(p)
+        return found
+
+    add(Path("/dev") / keyword)
+    add(Path("/dev") / f"tty{keyword}")
+    if _looks_like_dev(keyword):
+        for p in Path("/dev").glob(f"*{keyword}*"):
+            add(p)
+    return found
+
+
+def _tool_device_pids(path: Path) -> set[int]:
+    proc = _run(["lsof", "-t", str(path)])
+    if proc is not None:
+        if proc.returncode not in (0, 1):
+            return set()
+        return {int(x) for x in proc.stdout.split() if x.isdigit()}
+    proc = _run(["fuser", str(path)])
+    if proc is None:
+        return set()
+    text = f"{proc.stdout} {proc.stderr}"
+    return {int(m) for m in re.findall(r"\b(\d+)\b", text)}
+
+
+def pids_using_devices(devices: list[Path]) -> dict[int, list[str]]:
+    """pid -> device paths held open (via /proc/pid/fd, then lsof/fuser)."""
+    if not devices:
+        return {}
+    chr_wanted: dict[int, str] = {}
+    for dev in devices:
+        try:
+            st = dev.stat()
+        except OSError:
+            continue
+        if not statmod.S_ISCHR(st.st_mode):
+            continue
+        chr_wanted[st.st_rdev] = str(dev)
+
+    by_pid: dict[int, list[str]] = {}
+    skip = _self_and_ancestors()
+    for pid in _iter_pids():
+        if pid in skip:
+            continue
+        fd_dir = PROC / str(pid) / "fd"
+        try:
+            fds = os.listdir(fd_dir)
+        except OSError:
+            continue
+        held: list[str] = []
+        for fd in fds:
+            fp = fd_dir / fd
+            try:
+                st = os.stat(fp)
+            except OSError:
+                continue
+            if not statmod.S_ISCHR(st.st_mode):
+                continue
+            name = chr_wanted.get(st.st_rdev)
+            if name and name not in held:
+                held.append(name)
+        if held:
+            by_pid[pid] = held
+
+    for dev in devices:
+        for pid in _tool_device_pids(dev):
+            if pid in skip:
+                continue
+            names = by_pid.setdefault(pid, [])
+            s = str(dev)
+            if s not in names:
+                names.append(s)
+    return by_pid
+
+
+# ---------------------------------------------------------------------------
+# Display / kill
+# ---------------------------------------------------------------------------
+
+def _clip_cmd(cmd: str) -> str:
+    if len(cmd) <= CMD_MAX:
+        return cmd
+    return cmd[: CMD_MAX - 3] + "..."
+
+
+def print_table(rows: list[Proc]) -> None:
+    header = f"{'#':>3}  {'PID':>7}  {'USER':<12} {'CPU%':>6}  {'MEM%':>6}  {'STAT':<4}  COMMAND"
+    print(_c("1", header))
+    for i, p in enumerate(rows, 1):
+        cmd = _clip_cmd(p.command) + _format_ports(p.ports) + _format_devs(p.devices)
+        print(
+            f"{i:3d}  {p.pid:7d}  {p.user:<12} {p.cpu:6.1f}  {p.mem:6.1f}  "
+            f"{p.state:<4}  {cmd}"
+        )
+
+
+def parse_selection(text: str, n: int) -> list[int] | None:
+    text = text.strip()
+    if not text or text.lower() in ("a", "all"):
+        return list(range(n))
+    if text == "0":
+        return []
+    chosen: list[int] = []
+    for part in re.split(r"[,\s]+", text):
+        if not part:
+            continue
+        if not part.isdigit():
+            return None
+        idx = int(part)
+        if idx < 1 or idx > n:
+            return None
+        chosen.append(idx - 1)
+    # preserve order, drop dupes
+    seen: set[int] = set()
+    uniq: list[int] = []
+    for i in chosen:
+        if i not in seen:
+            seen.add(i)
+            uniq.append(i)
+    return uniq
+
+
+def prompt_kill(rows: list[Proc]) -> list[Proc]:
+    if not sys.stdin.isatty():
+        _die("stdin is not a TTY; cannot confirm which process to kill")
+    hint = "[1,2 | Enter=all | 0=cancel]"
+    while True:
+        try:
+            raw = input(f"Kill which? {hint} ")
+        except EOFError:
+            print()
+            return []
+        except KeyboardInterrupt:
+            print()
+            return []
+        sel = parse_selection(raw, len(rows))
+        if sel is None:
+            _warn(f"invalid selection; enter 1-{len(rows)}, Enter for all, or 0 to cancel")
+            continue
+        return [rows[i] for i in sel]
+
+
+def _pid_alive(pid: int) -> bool:
+    status = _read_text(PROC / str(pid) / "status")
+    if status is None:
+        return False
+    _, state, _ = _parse_status(status)
+    return state != "Z"
+
+
+def kill_procs(rows: list[Proc], *, force: bool) -> int:
+    sig = signal.SIGKILL if force else signal.SIGTERM
+    sig_name = "SIGKILL" if force else "SIGTERM"
+    sudo = "sudo " + " ".join(shlex.quote(a) for a in sys.argv)
+    failed = 0
+    for p in rows:
+        try:
+            os.kill(p.pid, sig)
+            _info(f"sent {sig_name} to pid {p.pid} ({_clip_cmd(p.command)})")
+        except ProcessLookupError:
+            _warn(f"pid {p.pid} already gone")
+        except PermissionError:
+            _warn(f"pid {p.pid}: permission denied (try: {sudo})")
+            failed += 1
+        except OSError as exc:
+            _error(f"pid {p.pid}: {exc}")
+            failed += 1
+    return failed
+
+
+def _wait_exit(pids: set[int], timeout: float) -> set[int]:
+    remaining = set(pids)
+    deadline = time.monotonic() + timeout
+    while remaining and time.monotonic() < deadline:
+        remaining = {pid for pid in remaining if _pid_alive(pid)}
+        if not remaining:
+            break
+        time.sleep(0.1)
+    return remaining
+
+
+def verify_and_follow_up(
+    killed: list[Proc],
+    *,
+    keyword: str | None,
+    port: int | None,
+    force: bool,
+) -> int:
+    """Wait for targeted PIDs to exit; prompt again if any survive or restart."""
+    timeout = 0.3 if force else 1.0
+    still_pids = _wait_exit({p.pid for p in killed}, timeout)
+    gone = [p for p in killed if p.pid not in still_pids]
+    still = [p for p in killed if p.pid in still_pids]
+    if gone:
+        noun = "process" if len(gone) == 1 else "processes"
+        _info(f"{len(gone)} targeted {noun} exited")
+    for p in still:
+        _warn(f"pid {p.pid} still alive ({_clip_cmd(p.command)})")
+
+    if not still_pids:
+        time.sleep(0.3)  # catch a fast supervisor respawn
+    current = find_matches(keyword, port)
+    if not current:
+        return 0
+
+    killed_pids = {p.pid for p in killed}
+    restarted = [p for p in current if p.pid not in killed_pids]
+    if restarted:
+        noun = "process" if len(restarted) == 1 else "processes"
+        _warn(f"{len(restarted)} matching {noun} appeared after kill "
+              f"(possibly restarted)")
+    elif still:
+        _warn("targeted process(es) ignored the signal")
+
+    print_table(current)
+    nxt = prompt_kill(current)
+    if not nxt:
+        _warn("cancelled")
+        return 0
+
+    survivor_pids = {p.pid for p in still}
+    escalate = [p for p in nxt if p.pid in survivor_pids]
+    fresh = [p for p in nxt if p.pid not in survivor_pids]
+    failed = 0
+    if escalate:
+        if not force:
+            _info("SIGTERM did not stop them; sending SIGKILL")
+        failed += kill_procs(escalate, force=True)
+    if fresh:
+        failed += kill_procs(fresh, force=force)
+    return failed + verify_and_follow_up(
+        nxt, keyword=keyword, port=port, force=force or bool(escalate),
+    )
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def _port_type(value: str) -> int:
+    try:
+        port = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"invalid port: {value}") from exc
+    if not 1 <= port <= 65535:
+        raise argparse.ArgumentTypeError(f"port out of range: {port}")
+    return port
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="px",
+        description="List or kill processes by keyword, port, or device.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""\
+examples:
+  px python              list processes matching 'python'
+  px USB0                list occupiers of /dev/ttyUSB0
+  px -p 8080             list processes using port 8080
+  px python -k          SIGTERM after confirm
+  px USB0 -k            kill occupier of /dev/ttyUSB0
+  px -p 8080 -k -f      SIGKILL after confirm
+""",
+    )
+    parser.add_argument(
+        "keyword",
+        nargs="?",
+        help="substring in process name/cmdline, or a device (USB0, ttyUSB0, /dev/ttyUSB0)",
+    )
+    parser.add_argument(
+        "-p",
+        "--port",
+        type=_port_type,
+        help="TCP/UDP port the process is using",
+    )
+    parser.add_argument(
+        "-k",
+        "--kill",
+        action="store_true",
+        help="kill selected matches after listing (default: SIGTERM)",
+    )
+    parser.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="send SIGKILL instead of SIGTERM (requires -k)",
+    )
+    return parser.parse_args(argv)
+
+
+def find_matches(keyword: str | None, port: int | None) -> list[Proc]:
+    skip = _self_and_ancestors()
+    port_pids: set[int] | None = None
+    if port is not None:
+        port_pids = pids_on_port(port)
+
+    dev_map: dict[int, list[str]] = {}
+    if keyword:
+        nodes = resolve_dev_nodes(keyword)
+        if nodes:
+            dev_map = pids_using_devices(nodes)
+
+    uptime = _uptime_s()
+    clk = _clk_tck()
+    mem_total = _mem_total_kb()
+    listen = listening_ports_by_pid()
+
+    if port_pids is not None and not keyword:
+        candidates = sorted(port_pids)
+    else:
+        candidates = _iter_pids()
+
+    rows: list[Proc] = []
+    for pid in candidates:
+        if pid in skip:
+            continue
+        if port_pids is not None and pid not in port_pids:
+            continue
+        proc = collect_proc(pid, uptime=uptime, clk=clk, mem_total=mem_total)
+        if proc is None:
+            continue
+        held = dev_map.get(pid, [])
+        if keyword and not matches_keyword(proc, keyword) and not held:
+            continue
+        proc.ports = listen.get(pid, [])
+        proc.devices = held
+        rows.append(proc)
+    return rows
+
+
+def _describe_query(keyword: str | None, port: int | None) -> str:
+    parts: list[str] = []
+    if keyword:
+        parts.append(f"keyword {keyword!r}")
+    if port is not None:
+        parts.append(f"port {port}")
+    return " and ".join(parts)
+
+
+def main(argv: list[str] | None = None) -> int:
+    if not PROC.is_dir():
+        _die("px requires Linux /proc")
+
+    args = parse_args(argv)
+    if args.force and not args.kill:
+        _die("-f/--force requires -k/--kill")
+    if not args.keyword and args.port is None:
+        _die("need a keyword and/or -p/--port (see px -h)")
+
+    rows = find_matches(args.keyword, args.port)
+    query = _describe_query(args.keyword, args.port)
+    if not rows:
+        _warn(f"no process matching {query}")
+        return 0
+
+    noun = "process" if len(rows) == 1 else "processes"
+    _info(f"found {len(rows)} {noun} matching {query}")
+    print_table(rows)
+
+    if not args.kill:
+        return 0
+
+    chosen = prompt_kill(rows)
+    if not chosen:
+        _warn("cancelled")
+        return 0
+    failed = kill_procs(chosen, force=args.force)
+    failed += verify_and_follow_up(
+        chosen, keyword=args.keyword, port=args.port, force=args.force,
+    )
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except BrokenPipeError:
+        sys.stderr.close()
+        raise SystemExit(0)
