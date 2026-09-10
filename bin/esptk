@@ -35,7 +35,7 @@ function SHOW_FEATURES()
     ESP_LOGN "unlock-flash.py:\tQuery flash status (-s) or reset flash (-r)"
     ESP_LOGN ""
 
-    ESP_LOGN "gitcc:\tgit resposity clean"
+    ESP_LOGN "git-clean.py:\tRestore repo + submodules to an unmodified working tree"
     ESP_LOGN "fpull:\tgit pull by force"
     ESP_LOGN "fpush:\tgit push by force"
     ESP_LOGN "frebase:\tgit (rebase & push) by force"
