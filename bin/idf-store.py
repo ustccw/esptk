@@ -4,13 +4,15 @@
 """
 Shallow shared ESP-IDF store.
 
-Keeps one working tree per commit under ~/esp/idf/trees/<sha> and points
-project ./esp-idf symlinks at it. Git objects are shared; working-tree
-files for different SHAs stay isolated.
+Keeps one working tree per commit under ~/esp/idf/trees/<8-char-sha>
+and points project ./esp-idf symlinks at it. Git objects are shared;
+working-tree files for different SHAs stay isolated. Directory names
+lengthen past 8 hex chars only when two installed SHAs would collide.
 
 Examples:
   idf-store.py init
   idf-store.py get 296b6eab9445fd720e71aecab961e2d3fbca9944
+  idf-store.py get --note 'ESP-AT v5.4.4' v5.4.4
   idf-store.py get --clean v5.4.4
   idf-store.py status
   idf-store.py doctor
@@ -33,11 +35,14 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Iterator, NoReturn
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 
 STORE_VERSION = 1
 DEFAULT_STORE = Path.home() / "esp" / "idf"
 DEFAULT_JOBS = 8
+TREE_ABBREV = 8
 LINK_NAME = "esp-idf"
 
 DEFAULT_REMOTES = [
@@ -302,6 +307,26 @@ def cache_dir_name(url: str) -> str:
     return f"{stem}-{digest}.git"
 
 
+def _http_json(url: str, *, timeout: int = 20) -> dict[str, Any] | None:
+    req = Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "idf-store.py",
+        },
+    )
+    try:
+        with urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+    except (HTTPError, URLError, TimeoutError, OSError):
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
 # ---------------------------------------------------------------------------
 # Store
 # ---------------------------------------------------------------------------
@@ -351,7 +376,84 @@ class Store:
         return [str(x) for x in remotes]
 
     def tree_path(self, sha: str) -> Path:
-        return self.trees / sha
+        scanned = self._scan_trees()
+        existing = scanned.get(sha)
+        if existing is not None:
+            return existing
+        others = [s for s in scanned if s != sha]
+        return self.trees / self._abbrev(sha, others)
+
+    def _abbrev(self, sha: str, others: list[str]) -> str:
+        n = TREE_ABBREV
+        while n < 40 and any(o[:n] == sha[:n] for o in others):
+            n += 1
+        return sha[:n]
+
+    def _scan_trees(self) -> dict[str, Path]:
+        """Map full 40-char SHA -> working-tree directory."""
+        found: dict[str, Path] = {}
+        if not self.trees.is_dir():
+            return found
+        for p in sorted(self.trees.iterdir()):
+            if not p.is_dir() or p.name.startswith("."):
+                continue
+            name = p.name.lower()
+            if not HEX.match(name) or not (7 <= len(name) <= 40):
+                continue
+            if SHA40.match(name):
+                sha = name
+            else:
+                sha = self._commit_sha(p, "HEAD")
+                if not sha:
+                    continue
+                if not sha.startswith(name):
+                    _warn(
+                        f"{p.name}: HEAD {sha[:12]}… does not match "
+                        f"directory name"
+                    )
+            if sha in found:
+                _die(f"duplicate tree for {sha}:\n  {found[sha]}\n  {p}")
+            found[sha] = p
+        return found
+
+    def _retarget_links(self, sha: str, dest: Path) -> None:
+        dest_s = str(dest.resolve())
+        dest_res = dest.resolve()
+        for item in list(self._link_list(sha)):
+            p = Path(item)
+            if not p.is_symlink():
+                continue
+            try:
+                if p.resolve() == dest_res:
+                    continue
+            except OSError:
+                pass
+            tmp = p.with_name(p.name + ".idf-store-new")
+            if _lexists(tmp):
+                tmp.unlink()
+            os.symlink(dest_s, str(tmp), target_is_directory=True)
+            os.replace(str(tmp), str(p))
+            _info(f"relinked {p} -> {dest_s}")
+
+    def _migrate_tree_names(self) -> None:
+        """Rename trees/<40-char-sha> (or other non-canonical names) to 8+."""
+        entries = self._scan_trees()
+        if not entries:
+            return
+        shas = list(entries)
+        planned: dict[str, Path] = {}
+        for sha in shas:
+            others = [s for s in shas if s != sha]
+            planned[sha] = self.trees / self._abbrev(sha, others)
+        for sha, src in entries.items():
+            dest = planned[sha]
+            if src.resolve() == dest.resolve():
+                continue
+            if dest.exists():
+                _die(f"cannot rename {src} -> {dest}: destination exists")
+            _info(f"renaming tree {src.name} -> {dest.name}")
+            src.rename(dest)
+            self._retarget_links(sha, dest)
 
     def module_cache(self, url: str) -> Path:
         return self.modules / cache_dir_name(url)
@@ -512,13 +614,87 @@ class Store:
             have = self._commit_sha(self.objects, low)
             if have:
                 return have
+            if not SHA40.match(low):
+                expanded = self._expand_sha_prefix(low)
+                if not expanded:
+                    _die(
+                        f"short SHA {ref!r} is not in the store and could "
+                        f"not be expanded. Pass the full 40-character "
+                        f"commit (remotes do not advertise abbreviated SHAs)."
+                    )
+                _info(f"expanded {low} -> {expanded}")
+                low = expanded
+            return self.fetch_into_bare(self.objects, low)
         return self.fetch_into_bare(self.objects, ref)
 
+    def _expand_sha_prefix(self, prefix: str) -> str | None:
+        """Turn a unique abbreviated SHA into 40 hex chars via GitLab/GitHub API."""
+        seen: set[str] = set()
+        for url in self.remotes():
+            parsed = parse_org_repo(url)
+            if not parsed:
+                continue
+            org, repo = parsed
+            stem = repo[:-4] if repo.endswith(".git") else repo
+            key = f"{org}/{stem}".lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            _info(f"looking up {prefix} as {org}/{stem}")
+            sha = (
+                self._lookup_sha_gitlab(org, stem, prefix)
+                or self._lookup_sha_github(org, stem, prefix)
+            )
+            if sha:
+                return sha
+        return None
+
+    def _gitlab_http_roots(self) -> list[str]:
+        roots: list[str] = []
+        for url in self.remotes():
+            parts = urlsplit(url)
+            host = (parts.netloc or "").lower()
+            if parts.scheme in ("http", "https") and "gitlab" in host:
+                root = f"{parts.scheme}://{parts.netloc}"
+                if root not in roots:
+                    roots.append(root)
+        fallback = "https://gitlab.espressif.cn:6688"
+        if fallback not in roots:
+            roots.append(fallback)
+        return roots
+
+    def _lookup_sha_gitlab(self, org: str, repo: str, prefix: str) -> str | None:
+        project = quote(f"{org}/{repo}", safe="")
+        for root in self._gitlab_http_roots():
+            data = _http_json(
+                f"{root}/api/v4/projects/{project}/repository/commits/{prefix}"
+            )
+            sha = self._sha_from_payload(data, prefix)
+            if sha:
+                return sha
+        return None
+
+    def _lookup_sha_github(self, org: str, repo: str, prefix: str) -> str | None:
+        data = _http_json(
+            f"https://api.github.com/repos/{org}/{repo}/commits/{prefix}"
+        )
+        return self._sha_from_payload(data, prefix)
+
+    @staticmethod
+    def _sha_from_payload(data: dict[str, Any] | None, prefix: str) -> str | None:
+        if not data:
+            return None
+        for key in ("id", "sha"):
+            val = data.get(key)
+            if not isinstance(val, str):
+                continue
+            sha = val.strip().lower()
+            if SHA40.match(sha) and sha.startswith(prefix):
+                return sha
+        return None
+
     def _match_installed(self, prefix: str) -> str | None:
-        names = []
-        if self.trees.is_dir():
-            names = [p.name for p in self.trees.iterdir()
-                     if p.is_dir() and SHA40.match(p.name)]
+        names = self.installed_shas()
         hits = [n for n in names if n.startswith(prefix)]
         if len(hits) == 1:
             return hits[0]
@@ -528,12 +704,7 @@ class Store:
         return None
 
     def installed_shas(self) -> list[str]:
-        if not self.trees.is_dir():
-            return []
-        return sorted(
-            p.name for p in self.trees.iterdir()
-            if p.is_dir() and SHA40.match(p.name)
-        )
+        return sorted(self._scan_trees())
 
     # -- submodules --
 
@@ -720,6 +891,7 @@ class Store:
     def ensure_tree(self, sha: str, *, clean: bool, jobs: int) -> Path:
         if not SHA40.match(sha):
             _die(f"internal error: not a 40-char sha: {sha}")
+        self._migrate_tree_names()
         dest = self.tree_path(sha)
         if dest.is_dir() and git_ok(["rev-parse", "--git-dir"], cwd=dest):
             if clean:
@@ -760,12 +932,8 @@ class Store:
                 shutil.rmtree(tmp, ignore_errors=True)
             raise
         describe = self._describe(dest)
-        idx = self.load_index()
-        trees = idx.setdefault("trees", {})
-        trees[sha] = {
-            "describe": describe,
-            "links": list(trees.get(sha, {}).get("links", [])),
-        }
+        meta = self._tree_meta(sha)
+        meta["describe"] = describe
         self.save_index()
         _info(f"installed {sha} ({describe})")
         return dest
@@ -786,6 +954,16 @@ class Store:
         if proc.returncode == 0 and proc.stdout.strip():
             return proc.stdout.strip()
         return git_out(["rev-parse", "--short", "HEAD"], cwd=repo)
+
+    def _commit_date(self, repo: Path) -> str:
+        proc = git(
+            ["log", "-1", "--date=short", "--format=%cd"],
+            cwd=repo, capture=True, check=False,
+        )
+        date = (proc.stdout or "").strip()
+        if proc.returncode == 0 and date:
+            return date
+        return "-"
 
     def _check_submodule_status(
         self, repo: Path, *, as_error: bool
@@ -815,11 +993,69 @@ class Store:
 
     # -- index links --
 
-    def _link_list(self, sha: str) -> list[str]:
+    def _tree_meta(self, sha: str) -> dict[str, Any]:
         trees = self.load_index().setdefault("trees", {})
-        entry = trees.setdefault(sha, {"describe": "", "links": []})
-        links = entry.setdefault("links", [])
-        return links
+        entry = trees.get(sha)
+        if entry is None:
+            entry = {"describe": "", "note": "", "links": []}
+            trees[sha] = entry
+            return entry
+        entry.setdefault("describe", "")
+        entry.setdefault("note", "")
+        entry.setdefault("links", [])
+        return entry
+
+    def _entries_from_raw(self, raw: Any) -> list[dict[str, str]]:
+        out: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for item in raw or []:
+            if isinstance(item, str):
+                path, note = item, ""
+            elif isinstance(item, dict) and item.get("path"):
+                path = str(item["path"])
+                note = str(item.get("note") or "").strip()
+            else:
+                continue
+            if path in seen:
+                continue
+            seen.add(path)
+            out.append({"path": path, "note": note})
+        return out
+
+    def _link_entries(self, sha: str) -> list[dict[str, str]]:
+        """Normalize links to [{path, note}, ...] and migrate a tree-level note."""
+        meta = self._tree_meta(sha)
+        entries = self._entries_from_raw(meta.get("links"))
+        raw = meta.get("links") or []
+        tree_note = (meta.get("note") or "").strip()
+        changed = any(not isinstance(x, dict) for x in raw) or len(raw) != len(entries)
+        if tree_note:
+            if len(entries) == 1 and not entries[0]["note"]:
+                entries[0]["note"] = tree_note
+            meta["note"] = ""
+            changed = True
+        if changed:
+            meta["links"] = entries
+            self.save_index()
+        return entries
+
+    def _link_list(self, sha: str) -> list[str]:
+        return [e["path"] for e in self._link_entries(sha)]
+
+    def set_note(self, sha: str, note: str, *, link: Path) -> None:
+        key = str(link)
+        entries = self._link_entries(sha)
+        text = note.strip()
+        for entry in entries:
+            if entry["path"] == key:
+                entry["note"] = text
+                break
+        else:
+            entries.append({"path": key, "note": text})
+        meta = self._tree_meta(sha)
+        meta["links"] = entries
+        meta["note"] = ""
+        self.save_index()
 
     def register_link(self, sha: str, link: Path) -> None:
         key = str(link)
@@ -828,31 +1064,33 @@ class Store:
         for other, meta in trees.items():
             if other == sha:
                 continue
-            links = meta.get("links") or []
-            if key in links:
-                meta["links"] = [x for x in links if x != key]
-        links = self._link_list(sha)
-        if key not in links:
-            links.append(key)
+            entries = self._entries_from_raw(meta.get("links"))
+            kept = [e for e in entries if e["path"] != key]
+            if len(kept) != len(entries):
+                meta["links"] = kept
+        entries = self._link_entries(sha)
+        if not any(e["path"] == key for e in entries):
+            entries.append({"path": key, "note": ""})
+            self._tree_meta(sha)["links"] = entries
         dest = self.tree_path(sha)
         if dest.is_dir():
-            trees[sha]["describe"] = self._describe(dest)
+            self._tree_meta(sha)["describe"] = self._describe(dest)
         self.save_index()
 
     def unregister_stale_links(self, sha: str) -> None:
-        links = self._link_list(sha)
+        entries = self._link_entries(sha)
         tree = self.tree_path(sha).resolve()
-        keep: list[str] = []
-        for item in links:
-            p = Path(item)
+        keep: list[dict[str, str]] = []
+        for entry in entries:
+            p = Path(entry["path"])
             if not p.is_symlink():
                 continue
             try:
                 if p.resolve() == tree:
-                    keep.append(item)
+                    keep.append(entry)
             except OSError:
                 continue
-        self.load_index()["trees"][sha]["links"] = keep
+        self._tree_meta(sha)["links"] = keep
         self.save_index()
 
     # -- link ./esp-idf --
@@ -955,12 +1193,18 @@ class Store:
         if not self.initialized():
             _die(f"store not initialized: {self.root} (run idf-store.py init)")
 
+        self._migrate_tree_names()
         root = self.root.resolve()
         for sha in self.installed_shas():
             dest = self.tree_path(sha)
             head = git_out(["rev-parse", "HEAD"], cwd=dest).lower()
             if head != sha:
                 _error(f"{dest}: HEAD is {head}, expected {sha}")
+                errors += 1
+            if not head.startswith(dest.name.lower()):
+                _error(
+                    f"{dest}: directory name is not a prefix of HEAD {head}"
+                )
                 errors += 1
             for gd in self._iter_gitdirs(dest):
                 alt = gd / "objects" / "info" / "alternates"
@@ -996,8 +1240,8 @@ class Store:
         idx = self.load_index()
         for sha, meta in (idx.get("trees") or {}).items():
             dest = self.tree_path(sha)
-            for link in meta.get("links") or []:
-                p = Path(link)
+            for entry in self._entries_from_raw(meta.get("links")):
+                p = Path(entry["path"])
                 if not p.is_symlink():
                     if _lexists(p):
                         _error(f"recorded path is not a symlink: {p}")
@@ -1028,25 +1272,41 @@ class Store:
     def status(self) -> None:
         if not self.initialized():
             _die(f"store not initialized: {self.root} (run idf-store.py init)")
-        print(f"store: {self.root}")
-        print(f"objects.git: {_human_size(_du_bytes(self.objects))}")
-        print(f"modules: {_human_size(_du_bytes(self.modules))}")
+        self._migrate_tree_names()
+        print(f"{_c('2', 'store:')} {self.root}")
+        print(
+            f"{_c('2', 'objects.git:')} "
+            f"{_c('33', _human_size(_du_bytes(self.objects)))}"
+        )
+        print(
+            f"{_c('2', 'modules:')} "
+            f"{_c('33', _human_size(_du_bytes(self.modules)))}"
+        )
         shas = self.installed_shas()
         if not shas:
-            print("trees: (none)")
+            print(f"{_c('2', 'trees:')} {_c('2', '(none)')}")
             return
-        print("trees:")
-        idx = self.load_index()
+        print(_c("1", "trees:"))
         for sha in shas:
             dest = self.tree_path(sha)
-            meta = (idx.get("trees") or {}).get(sha) or {}
+            meta = self._tree_meta(sha)
             describe = meta.get("describe") or self._describe(dest)
+            date = self._commit_date(dest)
             self.unregister_stale_links(sha)
-            links = self._link_list(sha)
+            entries = self._link_entries(sha)
             size = _human_size(_du_bytes(dest))
-            print(f"  {sha}  {describe}  {size}  {len(links)} link(s)")
-            for link in links:
-                print(f"    {link}")
+            nlink = len(entries)
+            print(
+                f"  {_c('1;97', sha)}  {_c('1;36', describe)}  "
+                f"{_c('2', date)}  {_c('33', size)}  "
+                f"{_c('32' if nlink else '2', f'{nlink} link(s)')}"
+            )
+            if entries:
+                for entry in entries:
+                    line = f"    {_c('36', entry['path'])}"
+                    if entry["note"]:
+                        line += " " + _c("2", f"({entry['note']})")
+                    print(line)
 
 
 # ---------------------------------------------------------------------------
@@ -1086,7 +1346,14 @@ def cmd_get(store: Store, args: argparse.Namespace) -> int:
     store.assert_esp_idf_slot(project)
     sha = store.resolve_super_ref(args.ref)
     _info(f"resolved {args.ref} -> {sha}")
-    store.link_project(sha, project, clean=args.clean, jobs=args.jobs)
+    dest = store.link_project(sha, project, clean=args.clean, jobs=args.jobs)
+    if args.note is not None:
+        store.set_note(sha, args.note, link=dest)
+        text = (args.note or "").strip()
+        if text:
+            _info(f"note: {text}")
+        else:
+            _info("note cleared")
     return 0
 
 
@@ -1123,11 +1390,12 @@ def build_parser() -> argparse.ArgumentParser:
 store layout (default ~/esp/idf, override with --store or IDF_STORE):
   objects.git          shared superproject objects (shallow, by SHA)
   modules/<name>.git   shared submodule objects (shallow, by SHA)
-  trees/<40-char-sha>  the only working tree for that commit
+  trees/<8-char-sha>   working tree (prefix lengthens on collision)
 
 examples:
   %(prog)s init
   %(prog)s get 296b6eab9445fd720e71aecab961e2d3fbca9944
+  %(prog)s get --note 'ESP-AT v5.4.4' v5.4.4
   %(prog)s get --clean v5.4.4
   %(prog)s status
   %(prog)s doctor
@@ -1147,7 +1415,7 @@ examples:
 
     p_get = sub.add_parser(
         "get",
-        help="Install trees/<sha> if needed and symlink ./esp-idf",
+        help="Install trees/<8-char-sha> if needed and symlink ./esp-idf",
     )
     p_get.add_argument(
         "ref", help="Commit SHA (full or unique prefix), tag, or branch"
@@ -1169,6 +1437,13 @@ examples:
         default=DEFAULT_JOBS,
         metavar="N",
         help=f"parallel submodule clones (default: {DEFAULT_JOBS})",
+    )
+    p_get.add_argument(
+        "--note",
+        default=None,
+        metavar="TEXT",
+        help="Per-project label shown next to this ./esp-idf link in status; "
+             "omit to leave unchanged, pass empty string to clear",
     )
     p_get.set_defaults(func=cmd_get)
 
