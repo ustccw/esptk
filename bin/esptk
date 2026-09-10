@@ -36,9 +36,9 @@ function SHOW_FEATURES()
     ESP_LOGN ""
 
     ESP_LOGN "git-clean.py:\tRestore repo + submodules to an unmodified working tree"
-    ESP_LOGN "fpull:\tgit pull by force"
+    ESP_LOGN "git-pull.py:\tShallow-fetch one remote branch/tag and check it out"
     ESP_LOGN "fpush:\tgit push by force"
-    ESP_LOGN "frebase:\tgit (rebase & push) by force"
+    ESP_LOGN "git-rebase.py:\tSquash recent commits into one (optional force-push)"
     ESP_LOGN "fsubmit:\tgit (add & commit & rebase & push) by force"
     ESP_LOGN "hexdump2bin:\tConvert the hexdump stream or txt file into binary file"
     ESP_LOGN ""
