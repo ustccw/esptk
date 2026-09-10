@@ -76,6 +76,7 @@ function SHOW_FEATURES()
     ESP_LOGN "idf:\tPrompt IDF_PATH"
     ESP_LOGN "eidf:\texport IDF_PATH script"
     ESP_LOGN "idf-store.py:\tShallow shared ESP-IDF store; trees/<8-char-sha>, symlink ./esp-idf"
+    ESP_LOGN "git-clone.py:\tShallow clone a git repo and its submodules (branch/tag/commit)"
     ESP_LOGN "gl-patch.py:\tMake a patch from a GitLab MR URL or commit SHA"
 
     # ESP_LOGI "-----------------------------------------------------------------------"
