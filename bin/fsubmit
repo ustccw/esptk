@@ -44,4 +44,4 @@ if [ "$input" = "N" -o "$input" = "n" ]; then
     exit
 fi
 
-frebase $to_rebase_cnt -p
+git-rebase.py -c $to_rebase_cnt -p
