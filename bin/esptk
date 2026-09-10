@@ -75,7 +75,7 @@ function SHOW_FEATURES()
     ESP_LOGN "mfm:\tmake flash monitor"
     ESP_LOGN "idf:\tPrompt IDF_PATH"
     ESP_LOGN "eidf:\texport IDF_PATH script"
-    ESP_LOGN "idf-store.py:\tShallow shared ESP-IDF store; get <commit> then symlink ./esp-idf"
+    ESP_LOGN "idf-store.py:\tShallow shared ESP-IDF store; trees/<8-char-sha>, symlink ./esp-idf"
 
     # ESP_LOGI "-----------------------------------------------------------------------"
 }
