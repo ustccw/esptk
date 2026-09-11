@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # chenwu@espressif.com
 """
-Fetch one remote branch or tag as cheaply as possible, then check it out.
+Fetch one remote branch, tag, or commit as cheaply as possible, then check it out.
 
 Local refs that share the name are deleted (prompt unless -f). After that,
 the remote side always wins: no merge, uncommitted changes are discarded.
@@ -13,7 +13,8 @@ Examples:
   git-pull.py -f -b master        # delete local master, shallow fetch
   git-pull.py -b release/v3.4     # last 2 years
   git-pull.py -b release/v3.4 -t 6m
-  git-pull.py --depth 20
+  git-pull.py -c a1b2c3d4e5f6...  # 40-char commit, detached
+  git-pull.py -d 20               # override default depth
 """
 
 from __future__ import annotations
@@ -31,6 +32,19 @@ RELEASE_PREFIX = "release/"
 DEFAULT_RELEASE_SINCE = "2y"
 SHORTHAND = re.compile(r"^(\d+)([ymd])$", re.IGNORECASE)
 SINCE_UNITS = {"y": "year", "m": "month", "d": "day"}
+
+# (new_url, old_url) pairs. Git will not follow HTTP redirects that change
+# the host/path (eclipse.org now 302s to a GitHub org page, not a repo).
+URL_INSTEAD_OF: tuple[tuple[str, str], ...] = (
+    (
+        "https://github.com/eclipse-tinydtls/tinydtls.git",
+        "https://git.eclipse.org/r/tinydtls/org.eclipse.tinydtls",
+    ),
+)
+
+SHA40 = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
+SHA_PREFIX = re.compile(r"^[0-9a-f]{7,40}$", re.IGNORECASE)
+TEMP_COMMIT_REF = "refs/git-pull/FETCH"
 
 
 # ---------------------------------------------------------------------------
@@ -72,9 +86,37 @@ def _die(msg: str, code: int = 1) -> NoReturn:
 # Git
 # ---------------------------------------------------------------------------
 
+def _sq(value: str) -> str:
+    """Quote for GIT_CONFIG_PARAMETERS (git sq_quote)."""
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
+def _inject_url_instead_of(env: dict[str, str]) -> None:
+    # GIT_CONFIG_COUNT is enough for a top-level `git clone`, but
+    # `git submodule` runs sanitize_submodule_env() which unsets
+    # GIT_CONFIG_COUNT (and then restores only GIT_CONFIG_PARAMETERS)
+    # before recursing into nested modules.
+    try:
+        n = int(env.get("GIT_CONFIG_COUNT") or "0")
+    except ValueError:
+        n = 0
+    pairs: list[str] = []
+    for new, old in URL_INSTEAD_OF:
+        key = f"url.{new}.insteadOf"
+        env[f"GIT_CONFIG_KEY_{n}"] = key
+        env[f"GIT_CONFIG_VALUE_{n}"] = old
+        pairs.append(_sq(f"{key}={old}"))
+        n += 1
+    env["GIT_CONFIG_COUNT"] = str(n)
+    extra = " ".join(pairs)
+    existing = env.get("GIT_CONFIG_PARAMETERS", "").rstrip()
+    env["GIT_CONFIG_PARAMETERS"] = f"{existing} {extra}".strip() if existing else extra
+
+
 def _git_env() -> dict[str, str]:
     env = os.environ.copy()
     env["GIT_PAGER"] = "cat"
+    _inject_url_instead_of(env)
     return env
 
 
@@ -152,10 +194,17 @@ def find_remote(repo: Path) -> str:
     return remotes[0]
 
 
+def log_url_rewrites(repo: Path, remote: str) -> None:
+    url = git_out(["remote", "get-url", remote], cwd=repo)
+    for new, old in URL_INSTEAD_OF:
+        if url.startswith(old) or old.startswith(url.rstrip("/")):
+            _info(f"url rewrite {old} -> {new}")
+
+
 def current_branch(repo: Path) -> str:
     name = git_out(["rev-parse", "--abbrev-ref", "HEAD"], cwd=repo)
     if not name or name == "HEAD":
-        _die("detached HEAD; pass -b <branch-or-tag>")
+        _die("detached HEAD; pass -b <branch-or-tag> or -c <commit>")
     return name
 
 
@@ -221,6 +270,31 @@ def classify_ref(repo: Path, remote: str, name: str, *, as_branch: bool) -> str:
     if has_tag:
         return "tag"
     _die(f"remote {remote} has no branch or tag {name!r}")
+
+
+def local_commit(repo: Path, name: str) -> str | None:
+    proc = git(
+        ["rev-parse", "--verify", "--quiet", f"{name}^{{commit}}"],
+        cwd=repo, capture=True, check=False, quiet=True,
+    )
+    sha = (proc.stdout or "").strip().lower()
+    if proc.returncode == 0 and SHA40.match(sha):
+        return sha
+    return None
+
+
+def parse_commit_arg(repo: Path, raw: str) -> str:
+    """Return a SHA to fetch. Short ids are expanded when unique locally."""
+    name = raw.strip()
+    if SHA40.match(name):
+        return name.lower()
+    if not SHA_PREFIX.match(name):
+        _die(f"{name!r} is not a commit SHA; pass a 7-40 character hex id")
+    local = local_commit(repo, name)
+    if local:
+        _info(f"expanded {name} -> {local}")
+        return local
+    return name.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -444,10 +518,6 @@ def fetch_ref(
     since: str | None,
     since_explicit: bool = False,
 ) -> None:
-    if kind == "branch":
-        spec = f"+refs/heads/{name}:refs/remotes/{remote}/{name}"
-    else:
-        spec = f"+refs/tags/{name}:refs/tags/{name}"
     limit = fetch_limit_args(
         repo, kind=kind, name=name, depth=depth, since=since,
         since_explicit=since_explicit,
@@ -459,6 +529,13 @@ def fetch_ref(
     else:
         window = "single ref, full negotiation"
     _info(f"fetch {kind} {name} from {remote} ({window})")
+    if kind == "commit":
+        fetch_commit(repo, remote, name, limit)
+        return
+    if kind == "branch":
+        spec = f"+refs/heads/{name}:refs/remotes/{remote}/{name}"
+    else:
+        spec = f"+refs/tags/{name}:refs/tags/{name}"
     cmd = [
         "fetch",
         *limit,
@@ -471,6 +548,36 @@ def fetch_ref(
     git(cmd, cwd=repo)
 
 
+def fetch_commit(repo: Path, remote: str, name: str, limit: list[str]) -> None:
+    specs = [name, f"+{name}:{TEMP_COMMIT_REF}"]
+    last_code = 1
+    for spec in specs:
+        cmd = [
+            "fetch",
+            *limit,
+            "--no-tags",
+            "--no-recurse-submodules",
+            "--no-auto-maintenance",
+            remote,
+            spec,
+        ]
+        last_code = git(cmd, cwd=repo, check=False).returncode
+        if last_code == 0:
+            return
+    if local_commit(repo, name):
+        _warn(f"could not fetch {name} from {remote}; using local object")
+        return
+    if not SHA40.match(name):
+        _die(f"could not fetch {name!r}; pass the full 40-character commit")
+    pretty = _fmt_git(["fetch", *limit, remote, name])
+    raise RuntimeError(f"{pretty} failed ({last_code})")
+
+
+def delete_temp_commit_ref(repo: Path) -> None:
+    if git_ok(["show-ref", "--verify", "--quiet", TEMP_COMMIT_REF], cwd=repo):
+        git(["update-ref", "-d", TEMP_COMMIT_REF], cwd=repo, quiet=True)
+
+
 def checkout_ref(repo: Path, remote: str, kind: str, name: str) -> None:
     if kind == "branch":
         checkout_forced(repo, ["-B", name, "FETCH_HEAD"])
@@ -481,6 +588,8 @@ def checkout_ref(repo: Path, remote: str, kind: str, name: str) -> None:
         )
         if proc.returncode != 0:
             _warn(f"could not set upstream to {remote}/{name}")
+    elif kind == "commit":
+        checkout_forced(repo, ["--detach", name])
     else:
         checkout_forced(repo, ["--detach", "FETCH_HEAD"])
 
@@ -503,14 +612,23 @@ def pull_ref(
     repo: Path,
     *,
     requested: str | None,
+    commit: str | None,
     force: bool,
     depth: int | None,
     since_raw: str | None,
 ) -> None:
     remote = find_remote(repo)
-    as_branch = requested is None
-    name = current_branch(repo) if requested is None else requested
-    kind = classify_ref(repo, remote, name, as_branch=as_branch)
+    log_url_rewrites(repo, remote)
+
+    if commit is not None:
+        name = parse_commit_arg(repo, commit)
+        kind = "commit"
+        _info(f"using commit {name}")
+    else:
+        as_branch = requested is None
+        name = current_branch(repo) if requested is None else requested
+        kind = classify_ref(repo, remote, name, as_branch=as_branch)
+
     depth, since, since_explicit = resolve_history(name, depth, since_raw)
 
     if kind == "branch" and local_branch_exists(repo, name):
@@ -518,7 +636,7 @@ def pull_ref(
     elif kind == "tag" and local_tag_exists(repo, name):
         confirm_delete("tag", name, force=force)
 
-    # Branches: fetch first so a failed fetch leaves the local branch intact.
+    # Branches/commits: fetch first so a failed fetch leaves the worktree intact.
     # Tags: drop the local tag first so the force refspec writes the remote one.
     if kind == "tag":
         discard_local(repo)
@@ -527,6 +645,27 @@ def pull_ref(
             repo, remote, kind, name,
             depth=depth, since=since, since_explicit=since_explicit,
         )
+        checkout_ref(repo, remote, kind, name)
+    elif kind == "commit":
+        local = local_commit(repo, name)
+        if local:
+            name = local
+        deepen = since is not None or (depth is not None and depth > 1)
+        if local is None or deepen:
+            fetch_ref(
+                repo, remote, kind, name,
+                depth=depth, since=since, since_explicit=since_explicit,
+            )
+            resolved = local_commit(repo, name)
+            if resolved:
+                name = resolved
+        else:
+            _info(f"commit {name} already present; skip fetch")
+        discard_local(repo)
+        head = git_out(["rev-parse", "HEAD"], cwd=repo).lower()
+        if head != name:
+            checkout_ref(repo, remote, kind, name)
+        delete_temp_commit_ref(repo)
     else:
         fetch_ref(
             repo, remote, kind, name,
@@ -534,8 +673,8 @@ def pull_ref(
         )
         discard_local(repo)
         delete_local_branch(repo, name)
+        checkout_ref(repo, remote, kind, name)
 
-    checkout_ref(repo, remote, kind, name)
     show_head(repo)
 
 
@@ -547,7 +686,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="git-pull.py",
         description=(
-            "Fetch one remote branch or tag as cheaply as possible, "
+            "Fetch one remote branch, tag, or commit as cheaply as possible, "
             "then check it out. Local same-named refs are deleted "
             "(prompt unless -f); the remote side always wins."
         ),
@@ -559,8 +698,13 @@ examples:
   %(prog)s -f -b master        # delete local master, then shallow fetch
   %(prog)s -b release/v3.4     # last 2 years
   %(prog)s -b release/v3.4 -t 6m
+  %(prog)s -c a1b2c3d4e5f6...  # 40-char commit, detached HEAD
   %(prog)s -t 1y               # current branch, last year
-  %(prog)s --depth 20          # 20 commits (--depth and -t are exclusive)
+  %(prog)s -d 20               # 20 commits (-d/--depth and -t are exclusive)
+
+If neither -t nor -d is given:
+  -d 1     branches, tags, and -c commits
+  -t 2y    refs named release/*
 
 -t/--since accepts 2y, 6m, 30d, or any git date (2 years ago, 2024-01-01).
 Explicit -t is always applied (git shallow history is repository-wide).
@@ -568,12 +712,23 @@ Implicit --depth / release/ window will not convert a full clone that
 still has other local branches.
 """,
     )
-    p.add_argument(
+    target = p.add_mutually_exclusive_group()
+    target.add_argument(
         "-b",
         metavar="REF",
         dest="ref",
         default=None,
         help="branch or tag to fetch (default: current branch)",
+    )
+    target.add_argument(
+        "-c", "--commit",
+        metavar="SHA",
+        dest="commit",
+        default=None,
+        help=(
+            "commit to check out detached (skip fetch if already local; "
+            "mutually exclusive with -b)"
+        ),
     )
     p.add_argument(
         "-f", "--force",
@@ -585,14 +740,20 @@ still has other local branches.
         "-t", "--since",
         metavar="DURATION",
         default=None,
-        help="shallow-since window (e.g. 2y, 6m, 30d, or 2024-01-01)",
+        help=(
+            "shallow-since window (e.g. 2y, 6m, 30d, or 2024-01-01); "
+            "default for release/*: 2y"
+        ),
     )
     hist.add_argument(
-        "--depth",
+        "-d", "--depth",
         type=int,
         default=None,
         metavar="N",
-        help="shallow history of N commits (mutually exclusive with -t)",
+        help=(
+            "shallow history of N commits (default: 1, except release/* "
+            "uses -t 2y; mutually exclusive with -t)"
+        ),
     )
     return p
 
@@ -606,6 +767,7 @@ def main(argv: list[str] | None = None) -> int:
         pull_ref(
             root,
             requested=args.ref,
+            commit=args.commit,
             force=args.force,
             depth=args.depth,
             since_raw=args.since,
