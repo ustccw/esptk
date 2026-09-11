@@ -37,6 +37,15 @@ DEFAULT_TOKEN_FILES = (
 )
 USER_AGENT = "git-clone.py"
 
+# (new_url, old_url) pairs. Git will not follow HTTP redirects that change
+# the host/path (eclipse.org now 302s to a GitHub org page, not a repo).
+URL_INSTEAD_OF: tuple[tuple[str, str], ...] = (
+    (
+        "https://github.com/eclipse-tinydtls/tinydtls.git",
+        "https://git.eclipse.org/r/tinydtls/org.eclipse.tinydtls",
+    ),
+)
+
 SHA40 = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
 SHA_PREFIX = re.compile(r"^[0-9a-f]{7,40}$", re.IGNORECASE)
 
@@ -117,10 +126,38 @@ def _du_bytes(path: Path) -> int:
 # Git
 # ---------------------------------------------------------------------------
 
+def _sq(value: str) -> str:
+    """Quote for GIT_CONFIG_PARAMETERS (git sq_quote)."""
+    return "'" + value.replace("'", "'\\''") + "'"
+
+
+def _inject_url_instead_of(env: dict[str, str]) -> None:
+    # GIT_CONFIG_COUNT is enough for a top-level `git clone`, but
+    # `git submodule` runs sanitize_submodule_env() which unsets
+    # GIT_CONFIG_COUNT (and then restores only GIT_CONFIG_PARAMETERS)
+    # before recursing into nested modules.
+    try:
+        n = int(env.get("GIT_CONFIG_COUNT") or "0")
+    except ValueError:
+        n = 0
+    pairs: list[str] = []
+    for new, old in URL_INSTEAD_OF:
+        key = f"url.{new}.insteadOf"
+        env[f"GIT_CONFIG_KEY_{n}"] = key
+        env[f"GIT_CONFIG_VALUE_{n}"] = old
+        pairs.append(_sq(f"{key}={old}"))
+        n += 1
+    env["GIT_CONFIG_COUNT"] = str(n)
+    extra = " ".join(pairs)
+    existing = env.get("GIT_CONFIG_PARAMETERS", "").rstrip()
+    env["GIT_CONFIG_PARAMETERS"] = f"{existing} {extra}".strip() if existing else extra
+
+
 def _git_env() -> dict[str, str]:
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_PAGER"] = "cat"
+    _inject_url_instead_of(env)
     return env
 
 
@@ -424,6 +461,8 @@ def clone_repo(
         git(["checkout", "--detach", "FETCH_HEAD"], cwd=dest)
 
     if recurse and (dest / ".gitmodules").is_file():
+        for new, old in URL_INSTEAD_OF:
+            _info(f"url rewrite {old} -> {new}")
         _info(
             f"submodule update --init --recursive --depth {submodule_depth} "
             f"--jobs {jobs}"
