@@ -44,7 +44,7 @@ function SHOW_FEATURES()
     ESP_LOGN ""
 
     ESP_LOGN "esp-logger.py:\tA simple serial port logger for ESP chips with logging, reset and reconnection capabilities."
-    ESP_LOGN "lookup-func.py:\tFind out the symbols in the binary file"
+    ESP_LOGN "lookup-symbol.py:\tFind symbols in static libraries (.a)"
     ESP_LOGN "esp-dump.py:\tDump the symbols from the elf file"
     ESP_LOGN "scheduler.py:\tDo the scheduling for the python scripts"
     ESP_LOGN "esp-combine-bin.py:\tCombine multiple bins into one"
