@@ -17,6 +17,9 @@ Quick start::
       --dut AT1=/dev/ttyUSB0,/dev/ttyUSB1 \\
       --dut AT2=/dev/ttyUSB2,/dev/ttyUSB3
 
+    # Repeat the same test without resetting between runs.
+    at-test.py -t bin/examples/at_smoke.py -p0 /dev/ttyUSB0 -p1 /dev/ttyUSB1 -c 10
+
 Test file contract
 ------------------
 - Optional ``DEVICES`` — named DUTs (ports / baud rates).
@@ -1984,12 +1987,23 @@ def create_argument_parser() -> argparse.ArgumentParser:
         default=5.0,
         help='Default per-step timeout in seconds. Default: 5.',
     )
+    parser.add_argument(
+        '--count', '-c',
+        type=int,
+        default=1,
+        metavar='N',
+        help='Repeat the test N times. Repeats do not reset the chip. '
+             'A failed repeat does not stop the rest unless --fail-fast '
+             'is set. Default: 1.',
+    )
     return parser
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = create_argument_parser()
     args = parser.parse_args(argv)
+    if args.count < 1:
+        parser.error('--count/-c must be >= 1')
 
     runner = AtCmdRunner()
     runner.logger.enable_timestamp = not args.no_timestamp
@@ -2051,10 +2065,32 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         runner.open_all()
         runner.reset_and_wait_ready()
-        if runner.should_exit:
-            exit_code = 1
-        else:
-            exit_code = runner.run_test_module(mod)
+        run_codes: List[int] = []
+        for index in range(args.count):
+            if runner.should_exit:
+                break
+            if args.count > 1:
+                runner.logger.log_info(
+                    f'===== run {index + 1}/{args.count} ====='
+                )
+            runner.report = TestReport()
+            run_codes.append(runner.run_test_module(mod))
+            if run_codes[-1] != 0 and runner.fail_fast:
+                break
+        if args.count > 1:
+            passed = sum(code == 0 for code in run_codes)
+            failed = len(run_codes) - passed
+            runner.logger.log_info(
+                f'======== COUNT: {passed} passed, {failed} failed '
+                f'({len(run_codes)}/{args.count} run) ========'
+            )
+        exit_code = (
+            0
+            if run_codes
+            and len(run_codes) == args.count
+            and all(code == 0 for code in run_codes)
+            else 1
+        )
     except Exception as e:
         runner.logger.log_error(f'Fatal error: {e}')
         runner.logger.log_error(traceback.format_exc())
