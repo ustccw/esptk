@@ -9,6 +9,7 @@ Type AT commands (or file paths) on stdin; watch replies from both ports.
 """
 
 import argparse
+import errno
 import os
 import platform
 import re
@@ -66,7 +67,14 @@ CTRL_K = '\x0b'
 CTRL_R = '\x12'
 CTRL_U = '\x15'
 CTRL_W = '\x17'
+CTRL_P = '\x10'
 BACKSPACE_CHARS = ('\x7f', '\x08')
+
+# AT data-mode exit ("+++") is recognized only as its own packet:
+# >= 20 ms quiet before the first '+', <= 20 ms between the three '+',
+# and >= 20 ms quiet after the third. No CR-LF.
+_DATA_MODE_QUIET_S = 0.02
+_PASSTHROUGH_EXIT = b'+++'
 
 REPL_PROMPT = '>>> '
 
@@ -132,6 +140,7 @@ class AtCmdRepl:
         self.port1_baudrate: int = 115200
         self.flow_control: bool = False
         self.no_reboot_chip: bool = False
+        self._last_cmd_tx: float = 0.0
 
     # ------------------------------------------------------------------
     # Color / formatting
@@ -817,15 +826,79 @@ class AtCmdRepl:
         # All other keyboard input is treated as an AT command line.
         return (line + '\r\n').encode('utf-8')
 
+    def _service_rx(self) -> None:
+        """Drain bytes already queued on the open ports and emit complete lines."""
+        if self._same_port:
+            self._drain_port(self.cmd_serial, 'cmd')
+        else:
+            self._drain_port(self.log_serial, 'log')
+            self._drain_port(self.cmd_serial, 'cmd')
+        self._flush_idle_partials()
+
+    def _write_nonblocking(self, data: bytes) -> int:
+        """Queue as many bytes as the kernel accepts without waiting for CTS.
+
+        ``Serial.write()`` plus ``flush()`` (``tcdrain``) waits until every
+        byte has left the UART. With RTS/CTS that wait does not return while
+        the device is itself waiting for this host to read, so command-port
+        reports stay unread and Ctrl+C stays inside the write. The port fd is
+        opened ``O_NONBLOCK``; ``EAGAIN`` means the tty buffer is full.
+        """
+        ser = self.cmd_serial
+        if ser is None:
+            return 0
+        if os.name == 'nt':
+            ser.write(data)
+            return len(data)
+        try:
+            return os.write(ser.fileno(), data)
+        except OSError as e:
+            if e.errno in (errno.EAGAIN, errno.EWOULDBLOCK, errno.EINTR):
+                return 0
+            raise
+
     def _send_to_cmd(self, data: bytes) -> None:
         if not self.cmd_serial or not self.cmd_serial.is_open:
             self.log_warn('Cannot send: command port is not open')
             return
-        try:
-            self.cmd_serial.write(data)
-            self.cmd_serial.flush()
-        except Exception as e:
-            self.log_error(f'Failed to write to command port: {e}')
+        view = memoryview(data)
+        offset = 0
+        total = len(view)
+        while offset < total:
+            if self.should_exit:
+                self.log_warn(f'Send aborted after {offset}/{total} bytes')
+                return
+            # Read before the next write so a full host RX buffer cannot
+            # deassert RTS while this send is still running.
+            self._service_rx()
+            try:
+                n = self._write_nonblocking(view[offset:])
+            except OSError as e:
+                self.log_error(f'Failed to write to command port: {e}')
+                return
+            if n > 0:
+                offset += n
+                self._last_cmd_tx = time.monotonic()
+                continue
+            self._wait_for_io(0.02)
+
+    def _wait_cmd_quiet(self, quiet_s: float) -> None:
+        """Block until ``quiet_s`` has passed since the last command-port write."""
+        elapsed = time.monotonic() - self._last_cmd_tx
+        if elapsed < quiet_s:
+            time.sleep(quiet_s - elapsed)
+
+    def _exit_passthrough(self) -> None:
+        """Send +++ with no CR-LF so the device leaves data mode."""
+        self._line_buf = []
+        self._line_cursor = 0
+        # +++ has no OK/ERROR. Drop the wait so >>> returns after data mode.
+        self._awaiting_response = False
+        self.log_info('Ctrl+P pressed, sending +++ to exit data mode')
+        self._wait_cmd_quiet(_DATA_MODE_QUIET_S)
+        self._send_to_cmd(_PASSTHROUGH_EXIT)
+        # Keep the line quiet after the third '+' so the packet stays "+++".
+        time.sleep(_DATA_MODE_QUIET_S)
 
     def _submit_line(self) -> None:
         line = ''.join(self._line_buf)
@@ -965,6 +1038,10 @@ class AtCmdRepl:
                 self.log_info('Ctrl+R pressed, resetting ESP chip...')
                 self.reset_esp_chip()
                 continue
+            if ch == CTRL_P:
+                flush_printable()
+                self._exit_passthrough()
+                continue
             if ch == CTRL_A:
                 flush_printable()
                 self._cursor_home()
@@ -1089,7 +1166,8 @@ class AtCmdRepl:
         self.log_info('AT Command REPL started')
         self.log_info(
             'Hotkeys: arrows/Home/End edit the line; Ctrl+Left/Right jump words; '
-            'Ctrl+A/E home/end; Ctrl+K/U/W kill; Ctrl+R reset chip; Ctrl+C exit'
+            'Ctrl+A/E home/end; Ctrl+K/U/W kill; Ctrl+R reset chip; '
+            'Ctrl+P sends +++ (exit data mode); Ctrl+C exit'
         )
         if self.port0 is not None and self.port1 is not None and self.port0 == self.port1:
             self.log_info(f'Using shared port for log+cmd: {self.port0}')
@@ -1134,12 +1212,7 @@ class AtCmdRepl:
             while not self.should_exit:
                 try:
                     self._wait_for_io(0.05)
-                    if self._same_port:
-                        self._drain_port(self.cmd_serial, 'cmd')
-                    else:
-                        self._drain_port(self.log_serial, 'log')
-                        self._drain_port(self.cmd_serial, 'cmd')
-                    self._flush_idle_partials()
+                    self._service_rx()
                     self._poll_stdin()
                 except Exception as e:
                     self.log_error(str(e))
@@ -1160,7 +1233,8 @@ def create_argument_parser() -> argparse.ArgumentParser:
             'Line editing: Left/Right, Home/End, Delete, Backspace; '
             'Ctrl+Left/Right word jump; Ctrl+A/E home/end; '
             'Ctrl+K kill-to-end; Ctrl+U kill-line; Ctrl+W kill-word. '
-            'Ctrl+R resets the chip (log port); Ctrl+C exits. '
+            'Ctrl+R resets the chip (log port); Ctrl+P sends +++ with no '
+            'CR-LF to exit data mode; Ctrl+C exits. '
             'Path-like lines (/ ./ ~/ drive:) send the file as raw bytes; '
             'all other input is sent as an AT line with \\r\\n appended.'
         ),
