@@ -11,26 +11,25 @@
 | `echo` | 收到一帧就原样回一帧。 |
 | `both` | 收和发并行。发送的是脚本自己产生的二进制流，不是把收到的内容回回去。 |
 
-`send` 和 `both` 还要：
-
-- `-b` / `--bytes`：一共发多少字节
-- `-sr` / `--send-rate`：字节/秒，`0` 表示不限速
+- `-sb` / `--send-bytes`：一共发多少字节。`send` 和 `both` 必填。
+- `-rb` / `--recv-bytes`：期望收多少字节。`recv`、`echo`、`both` 可用。收到这个字节数时 RX 速率定格，之后连接还在也不会把速率拉低。再收到更多字节时打一行 warning，字节和帧数继续累加。
+- `-sr` / `--send-rate`：字节/秒，`0` 表示不限速。只用于 `send` 和 `both`。
 - `-fs` / `--frame-size`：每帧长度，默认 `4096`。不要超过 AT 侧 `AT+WSCFG` 的 buffer（烟测用 8192）
 
 限速按帧：下一帧时刻是第一帧发出时刻加上已发字节除以 rate。已经落后就马上发。`send` 和 `both` 在客户端连上后先等 1 秒，再发第一帧。
 
-RX 从这一次连接收到的第一包应用数据开始计时，TX 从这一次连接发出的第一包开始计时。PING/PONG 不计入。连接关掉后不再打吞吐，下一次连接从零重算。`-i` / `--interval` 默认 `1` 秒打一行（连接数、RX/TX 字节、帧数、KiB/s、Mbps）。没有连接时不打；这一行和上一行相同时也不再重复打。`0` 表示只在连接结束和 Ctrl-C 时打累计结果。
+RX 从这一次连接收到的第一包应用数据开始计时，TX 从这一次连接发出的第一包开始计时。PING/PONG 不计入。给了 `-rb` 时，RX 速率的结束时刻是第一次达到该字节数的时刻。连接关掉后不再打吞吐，下一次连接从零重算。`-i` / `--interval` 默认 `1` 秒打一行（连接数、RX/TX 字节、帧数、KiB/s、Mbps）。没有连接时不打；这一行和上一行相同时也不再重复打。`0` 表示只在连接结束和 Ctrl-C 时打累计结果。
 
 `-H` / `--host` 默认 `0.0.0.0`。`-p` / `--port` 明文默认 `8765`，TLS 默认 `8766`。
 
 ```bash
-python ws-server.py -m recv
-python ws-server.py -m send -b 262144 -sr 32768 -fs 4096
-python ws-server.py -m echo -i 0
-python ws-server.py -m both -b 262144 -sr 49152 -fs 4096
+python ws-server.py -m recv -rb 262144
+python ws-server.py -m send -sb 262144 -sr 32768 -fs 4096
+python ws-server.py -m echo -rb 262144 -i 0
+python ws-server.py -m both -sb 262144 -rb 262144 -sr 49152 -fs 4096
 
-python wss-server.py -m recv
-python wss-server.py -pki 01 -m send -b 262144 -sr 32768
+python wss-server.py -m recv -rb 262144
+python wss-server.py -pki 01 -m send -sb 262144 -sr 32768
 python wss-server.py -m recv --verify-client
 ```
 

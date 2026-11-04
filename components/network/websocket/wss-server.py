@@ -32,22 +32,42 @@ HERE = Path(__file__).resolve().parent
 
 
 class Stats:
-    def __init__(self):
+    def __init__(self, rx_limit=None):
         self.connections = 0
+        self.rx_limit = rx_limit
         self.rx_bytes = 0
         self.tx_bytes = 0
         self.rx_frames = 0
         self.tx_frames = 0
         self.rx_t0 = None
         self.tx_t0 = None
+        # RX rate uses this window once rx_bytes first reaches rx_limit.
+        self.rx_done_t = None
+        self.rx_rate_bytes = 0
+        self.rx_over_warned = False
 
     def add_rx(self, n):
         if n <= 0:
             return
+        now = time.monotonic()
         if self.rx_t0 is None:
-            self.rx_t0 = time.monotonic()
+            self.rx_t0 = now
         self.rx_bytes += n
         self.rx_frames += 1
+        limit = self.rx_limit
+        if not limit:
+            return
+        if self.rx_done_t is None:
+            if self.rx_bytes >= limit:
+                self.rx_done_t = now
+                self.rx_rate_bytes = self.rx_bytes
+            return
+        if not self.rx_over_warned:
+            self.rx_over_warned = True
+            print(
+                f"warning: rx {self.rx_bytes} B exceeds -rb {limit}",
+                flush=True)
+        return
 
     def add_tx(self, n):
         if n <= 0:
@@ -58,10 +78,11 @@ class Stats:
         self.tx_frames += 1
 
     @staticmethod
-    def _rate(nbytes, t0):
+    def _rate(nbytes, t0, t1=None):
         if t0 is None or nbytes <= 0:
             return "n/a"
-        dt = time.monotonic() - t0
+        end = time.monotonic() if t1 is None else t1
+        dt = end - t0
         if dt <= 0:
             return "n/a"
         kib = nbytes / 1024 / dt
@@ -78,12 +99,18 @@ class Stats:
         self.tx_frames = 0
         self.rx_t0 = None
         self.tx_t0 = None
+        self.rx_done_t = None
+        self.rx_rate_bytes = 0
+        self.rx_over_warned = False
 
     def format(self):
+        if self.rx_done_t is None:
+            rx_rate = self._rate(self.rx_bytes, self.rx_t0)
+        else:
+            rx_rate = self._rate(self.rx_rate_bytes, self.rx_t0, self.rx_done_t)
         return (
             f"conn={self.connections} "
-            f"rx={self.rx_bytes} B/{self.rx_frames} frames "
-            f"({self._rate(self.rx_bytes, self.rx_t0)}) "
+            f"rx={self.rx_bytes} B/{self.rx_frames} frames ({rx_rate}) "
             f"tx={self.tx_bytes} B/{self.tx_frames} frames "
             f"({self._rate(self.tx_bytes, self.tx_t0)})"
         )
@@ -118,8 +145,8 @@ async def send_loop(websocket, args, stats):
     try:
         # Let AT+WSOPEN print OK before the first +WS_DATA.
         await asyncio.sleep(1)
-        while sent < args.bytes:
-            n = min(args.size, args.bytes - sent)
+        while sent < args.send_bytes:
+            n = min(args.size, args.send_bytes - sent)
             if t0 is not None and args.rate > 0:
                 delay = t0 + sent / args.rate - time.monotonic()
                 if delay > 0:
@@ -232,8 +259,11 @@ def parse_args():
         "-i", "--interval", type=float, default=1,
         help="stats period in seconds; 0 prints only on close and Ctrl-C")
     parser.add_argument(
-        "-b", "--bytes", type=int, default=None,
+        "-sb", "--send-bytes", type=int, default=None, dest="send_bytes",
         help="total bytes to send (required for send and both)")
+    parser.add_argument(
+        "-rb", "--recv-bytes", type=int, default=None, dest="recv_bytes",
+        help="expected RX bytes; the RX rate freezes once this count is reached")
     parser.add_argument(
         "-sr", "--send-rate", type=float, default=0, dest="rate",
         help="send rate in bytes/s; 0 means unlimited")
@@ -250,11 +280,17 @@ def parse_args():
         "--verify-client", action="store_true",
         help="require a client certificate signed by server/server_ca.crt")
     args = parser.parse_args()
+    if args.send_bytes is not None and args.send_bytes < 1:
+        parser.error("-sb/--send-bytes must be > 0")
+    if args.recv_bytes is not None and args.recv_bytes < 1:
+        parser.error("-rb/--recv-bytes must be > 0")
     if args.mode in ("send", "both"):
-        if args.bytes is None or args.bytes < 1:
-            parser.error("-b/--bytes is required and must be > 0 for mode send or both")
-    elif args.bytes is not None or args.rate != 0:
-        parser.error("-b/--bytes and -sr/--send-rate apply only to mode send or both")
+        if args.send_bytes is None:
+            parser.error("-sb/--send-bytes is required for mode send or both")
+    elif args.send_bytes is not None or args.rate != 0:
+        parser.error("-sb/--send-bytes and -sr/--send-rate apply only to mode send or both")
+    if args.mode == "send" and args.recv_bytes is not None:
+        parser.error("-rb/--recv-bytes applies only to mode recv, echo, or both")
     if args.rate < 0:
         parser.error("-sr/--send-rate must be >= 0")
     if args.size < 1:
@@ -265,7 +301,7 @@ def parse_args():
 
 
 async def serve_forever(args):
-    stats = Stats()
+    stats = Stats(rx_limit=args.recv_bytes)
     ctx, cert, key, ca = ssl_context(args)
     loop = asyncio.get_running_loop()
     stop = asyncio.Event()
@@ -286,7 +322,8 @@ async def serve_forever(args):
                 ssl=ctx, compression=None, max_size=None):
             print(
                 f"listening wss://{args.host}:{args.port} mode={args.mode} "
-                f"bytes={args.bytes} rate={args.rate} size={args.size}",
+                f"sb={args.send_bytes} rb={args.recv_bytes} "
+                f"rate={args.rate} size={args.size}",
                 flush=True)
             print(f"cert={cert}", flush=True)
             print(f"key={key}", flush=True)
