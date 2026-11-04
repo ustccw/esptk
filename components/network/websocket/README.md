@@ -14,8 +14,8 @@
 `send` 和 `both` 还要：
 
 - `-b` / `--bytes`：一共发多少字节
-- `-r` / `--rate`：字节/秒，`0` 表示不限速
-- `-s` / `--size`：每帧长度，默认 `4096`。不要超过 AT 侧 `AT+WSCFG` 的 buffer（烟测用 8192）
+- `-sr` / `--send-rate`：字节/秒，`0` 表示不限速
+- `-fs` / `--frame-size`：每帧长度，默认 `4096`。不要超过 AT 侧 `AT+WSCFG` 的 buffer（烟测用 8192）
 
 限速按帧：下一帧时刻是第一帧发出时刻加上已发字节除以 rate。已经落后就马上发。`send` 和 `both` 在客户端连上后先等 1 秒，再发第一帧。
 
@@ -25,12 +25,12 @@ RX 从这一次连接收到的第一包应用数据开始计时，TX 从这一�
 
 ```bash
 python ws-server.py -m recv
-python ws-server.py -m send -b 262144 -r 32768 -s 4096
+python ws-server.py -m send -b 262144 -sr 32768 -fs 4096
 python ws-server.py -m echo -i 0
-python ws-server.py -m both -b 262144 -r 49152 -s 4096
+python ws-server.py -m both -b 262144 -sr 49152 -fs 4096
 
 python wss-server.py -m recv
-python wss-server.py -pki 01 -m send -b 262144 -r 32768
+python wss-server.py -pki 01 -m send -b 262144 -sr 32768
 python wss-server.py -m recv --verify-client
 ```
 

@@ -209,8 +209,19 @@ def ssl_context(args):
     return ctx, cert, key, ca
 
 
+class _ExactParser(argparse.ArgumentParser):
+    """Reject single-dash prefixes such as ``-s`` for ``-sr`` or ``-p`` for ``-pki``."""
+
+    def _get_option_tuples(self, option_string):
+        result = super()._get_option_tuples(option_string)
+        if len(option_string) >= 2 and option_string[1] not in self.prefix_chars:
+            return [item for item in result if item[1] == option_string]
+        return result
+
+
 def parse_args():
-    parser = argparse.ArgumentParser(
+    parser = _ExactParser(
+        allow_abbrev=False,
         description="TLS WebSocket server for AT throughput tests.")
     parser.add_argument(
         "-m", "--mode", required=True, choices=("recv", "send", "echo", "both"),
@@ -224,10 +235,10 @@ def parse_args():
         "-b", "--bytes", type=int, default=None,
         help="total bytes to send (required for send and both)")
     parser.add_argument(
-        "-r", "--rate", type=float, default=0,
+        "-sr", "--send-rate", type=float, default=0, dest="rate",
         help="send rate in bytes/s; 0 means unlimited")
     parser.add_argument(
-        "-s", "--size", type=int, default=DEFAULT_FRAME,
+        "-fs", "--frame-size", type=int, default=DEFAULT_FRAME, dest="size",
         help="bytes per sent frame (default 4096)")
     parser.add_argument(
         "-pki", "--pki", choices=("00", "01"), default="00",
@@ -243,11 +254,11 @@ def parse_args():
         if args.bytes is None or args.bytes < 1:
             parser.error("-b/--bytes is required and must be > 0 for mode send or both")
     elif args.bytes is not None or args.rate != 0:
-        parser.error("-b/--bytes and -r/--rate apply only to mode send or both")
+        parser.error("-b/--bytes and -sr/--send-rate apply only to mode send or both")
     if args.rate < 0:
-        parser.error("-r/--rate must be >= 0")
+        parser.error("-sr/--send-rate must be >= 0")
     if args.size < 1:
-        parser.error("-s/--size must be > 0")
+        parser.error("-fs/--frame-size must be > 0")
     if args.interval < 0:
         parser.error("-i/--interval must be >= 0")
     return args
