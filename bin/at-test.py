@@ -847,9 +847,9 @@ class AtDevice:
     ) -> StepResult:
         """Wait for pattern without sending. ``port`` / ``expect_port``: cmd|log|any.
 
-        ``after``: history mark from ``dut.mark()`` — match lines received since
-        that mark (needed when the peer already produced output during another
-        DUT's step).
+        ``after``: absolute history mark from ``dut.mark()`` — match lines
+        received since that mark (needed when the peer already produced output
+        during another DUT's step). Survives ``_line_history`` truncation.
         """
         if not self.runner or not self.runner.ctx:
             raise RuntimeError('AtDevice is not attached to a running context')
@@ -1996,6 +1996,15 @@ def create_argument_parser() -> argparse.ArgumentParser:
              'A failed repeat does not stop the rest unless --fail-fast '
              'is set. Default: 1.',
     )
+    parser.add_argument(
+        '--test-param',
+        nargs=argparse.REMAINDER,
+        default=[],
+        metavar='PARAM',
+        help='Parameters forwarded to the test as TEST_ARGV. Put this last. '
+             'Example: -t stress/websocket/ws-client.py -p0 0 -p1 1 '
+             '--test-param -m send -sb 262144',
+    )
     return parser
 
 
@@ -2029,6 +2038,22 @@ def main(argv: Optional[List[str]] = None) -> int:
         runner.logger.log_error(f'Failed to load test file: {e}')
         runner.logger.close_log_file()
         return 1
+
+    test_argv = list(args.test_param)
+    if test_argv[:1] == ['--']:
+        test_argv = test_argv[1:]
+    setattr(mod, 'TEST_ARGV', test_argv)
+
+    # Abort before port probing, open, or reset. Used by cases that need a
+    # lab network and must not touch the DUT when that network is down.
+    precheck = getattr(mod, 'precheck', None)
+    if callable(precheck):
+        try:
+            precheck()
+        except Exception as e:
+            runner.logger.log_error(str(e))
+            runner.logger.close_log_file()
+            return 1
 
     try:
         mod_specs = devices_from_module(mod)
