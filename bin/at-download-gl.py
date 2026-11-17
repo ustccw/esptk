@@ -22,6 +22,8 @@ Examples:
       Use the latest successful pipeline on another branch instead of master.
   at-download-gl.py -c esp32c5
       Only list firmware jobs for that chip (esp32 does not match esp32c3).
+  at-download-gl.py -j esp32c6_4mb_at
+      Download that job from the latest master pipeline (no prompt).
   at-download-gl.py -u https://gitlab.espressif.cn:6688/application/esp-at/-/pipelines/352799
       Download from a specific pipeline URL (interactive job pick).
   at-download-gl.py -u https://gitlab.espressif.cn:6688/application/esp-at/-/jobs/14643605
@@ -411,9 +413,36 @@ def job_artifacts_size(job: dict[str, Any]) -> int | None:
     return None
 
 
+def _parse_job_name(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    name = raw.strip()
+    if not name:
+        _die("--job/-j requires a job name.")
+    return name
+
+
+def _match_job_by_name(
+    jobs: list[dict[str, Any]], job_name: str
+) -> dict[str, Any]:
+    """Exact job-name match. Never falls back to the interactive picker."""
+    matched = [j for j in jobs if (j.get("name") or "") == job_name]
+    if len(matched) == 1:
+        return matched[0]
+    if not matched:
+        seen = ", ".join(j.get("name") or "?" for j in jobs) or "(none)"
+        _die(
+            f"No firmware job named {job_name!r}. "
+            f"Candidates: {seen}"
+        )
+    ids = ", ".join(str(j.get("id") or "?") for j in matched)
+    _die(f"Multiple firmware jobs named {job_name!r} (ids: {ids}).")
+
+
 def select_job(
     jobs: list[dict[str, Any]],
     chip: str | None = None,
+    job_name: str | None = None,
 ) -> dict[str, Any]:
     jobs = filter_firmware_jobs(jobs, chip=chip)
     if not jobs:
@@ -422,51 +451,54 @@ def select_job(
             "(expected job names starting with 'esp')."
         )
 
-    chip_note = f", chip={chip!r}" if chip else ""
-    print()
-    print(
-        f"Found {len(jobs)} firmware job(s) "
-        f"(name starts with 'esp'{chip_note}).\n"
-    )
-
-    if len(jobs) == 1:
-        job = jobs[0]
+    if job_name is not None:
+        job = _match_job_by_name(jobs, job_name)
     else:
-        sep = "-" * 81
-        print(sep)
-        print(
-            f"| {'idx':>3} | {'job name':<39} | {'state':^7} | "
-            f"{'commit':^7} | {'job id':>8} |"
-        )
-        print(sep)
-        for i, job_row in enumerate(jobs):
-            name = (job_row.get("name") or "?")[:39]
-            state = (job_row.get("status") or "?")[:7]
-            commit = _job_short_commit(job_row)[:7]
-            jid = str(job_row.get("id") or "?")
-            print(f"| {i:3d} | {name:<39} | {state:^7} | {commit:^7} | {jid:>8} |")
-        print(sep)
+        chip_note = f", chip={chip!r}" if chip else ""
         print()
+        print(
+            f"Found {len(jobs)} firmware job(s) "
+            f"(name starts with 'esp'{chip_note}).\n"
+        )
 
-        try:
-            raw = input(
-                f"Select job by index "
-                f"(0-{len(jobs) - 1}, default 0): "
-            ).strip()
-        except EOFError:
-            raw = ""
-        except KeyboardInterrupt:
-            _interrupted()
-        if not raw:
-            idx = 0
+        if len(jobs) == 1:
+            job = jobs[0]
         else:
+            sep = "-" * 81
+            print(sep)
+            print(
+                f"| {'idx':>3} | {'job name':<39} | {'state':^7} | "
+                f"{'commit':^7} | {'job id':>8} |"
+            )
+            print(sep)
+            for i, job_row in enumerate(jobs):
+                name = (job_row.get("name") or "?")[:39]
+                state = (job_row.get("status") or "?")[:7]
+                commit = _job_short_commit(job_row)[:7]
+                jid = str(job_row.get("id") or "?")
+                print(f"| {i:3d} | {name:<39} | {state:^7} | {commit:^7} | {jid:>8} |")
+            print(sep)
+            print()
+
             try:
-                idx = int(raw)
-            except ValueError:
-                _die(f"Invalid index: {raw!r}")
-        if not 0 <= idx < len(jobs):
-            _die(f"Index out of range: {idx}")
-        job = jobs[idx]
+                raw = input(
+                    f"Select job by index "
+                    f"(0-{len(jobs) - 1}, default 0): "
+                ).strip()
+            except EOFError:
+                raw = ""
+            except KeyboardInterrupt:
+                _interrupted()
+            if not raw:
+                idx = 0
+            else:
+                try:
+                    idx = int(raw)
+                except ValueError:
+                    _die(f"Invalid index: {raw!r}")
+            if not 0 <= idx < len(jobs):
+                _die(f"Index out of range: {idx}")
+            job = jobs[idx]
 
     status = job.get("status") or ""
     if status != "success":
@@ -985,6 +1017,11 @@ def build_parser() -> argparse.ArgumentParser:
             "      Only list firmware jobs for that chip (exact: esp32 does\n"
             "      not match esp32c3; esp32c6 does not match esp32c61).\n"
             "\n"
+            "  at-download-gl.py -j esp32c6_4mb_at\n"
+            "      Download that job from the latest master pipeline.\n"
+            "      Exact name; skips the interactive prompt. Combine with\n"
+            "      -c to also require the chip match.\n"
+            "\n"
             f"  at-download-gl.py -u {PIPELINE_WEB_PREFIX}/352799\n"
             "      Download from a specific pipeline (interactive job pick).\n"
             "      A bare numeric id is treated as a pipeline id.\n"
@@ -1002,6 +1039,13 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Filter firmware jobs by chip (exact: esp32, esp32c3, esp32c5, ...; "
             "esp32 does not match esp32c3)"
+        ),
+    )
+    p.add_argument(
+        "-j", "--job", metavar="NAME",
+        help=(
+            "Select one firmware job by exact name and skip the prompt "
+            "(e.g. esp32c6_4mb_at). With --chip, the name must match that chip."
         ),
     )
     p.add_argument(
@@ -1040,6 +1084,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    job_name = _parse_job_name(args.job)
 
     if args.memory and not (args.port or args.legacy_port):
         _die("--memory/-m requires --port/-p (or legacy USB index).")
@@ -1071,6 +1116,11 @@ def main(argv: list[str] | None = None) -> int:
                     f"Job {job.get('name')!r} does not match chip "
                     f"{args.chip!r} from --chip."
                 )
+            if job_name and (job.get("name") or "") != job_name:
+                _die(
+                    f"Job {job.get('name')!r} does not match "
+                    f"{job_name!r} from --job."
+                )
         else:
             _info(f"Using pipeline from --url (id={entity_id})")
             pipeline = get_pipeline(token, entity_id)
@@ -1083,7 +1133,7 @@ def main(argv: list[str] | None = None) -> int:
             web = pipeline.get("web_url") or f"{PIPELINE_WEB_PREFIX}/{entity_id}"
             _info(f"GitLab pipeline: {web}")
             jobs = list_jobs_for_pipeline(token, entity_id)
-            job = select_job(jobs, chip=args.chip)
+            job = select_job(jobs, chip=args.chip, job_name=job_name)
     else:
         _info(f"Using branch: {args.branch}")
         _info("Looking up latest successful GitLab pipeline...")
@@ -1098,7 +1148,7 @@ def main(argv: list[str] | None = None) -> int:
         web = pipeline.get("web_url") or f"{PIPELINE_WEB_PREFIX}/{pipeline_id}"
         _info(f"GitLab pipeline: {web}")
         jobs = list_jobs_for_pipeline(token, pipeline_id)
-        job = select_job(jobs, chip=args.chip)
+        job = select_job(jobs, chip=args.chip, job_name=job_name)
 
     job_id = int(job["id"])
     job_name = job.get("name") or "?"

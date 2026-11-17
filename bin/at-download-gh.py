@@ -22,6 +22,8 @@ Examples:
       Use the latest successful build on another branch instead of master.
   at-download-gh.py -c esp32c5
       Only list artifacts for that chip (esp32 does not match esp32c3).
+  at-download-gh.py -j esp32c6_4mb_at
+      Download that artifact from the latest master build (no prompt).
   at-download-gh.py -u https://github.com/espressif/esp-at/actions/runs/28586915579
       Download from a specific GitHub Actions run URL (skip branch lookup;
       owner/repo is taken from the URL, so forks work too).
@@ -455,12 +457,41 @@ def filter_names_by_chip(names: list[str], chip: str) -> list[str]:
     )
 
 
+def _parse_job_name(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    name = raw.strip()
+    if not name:
+        _die("--job/-j requires a job name.")
+    return name
+
+
+def _match_artifact_by_name(
+    artifact_names: list[str], job_name: str
+) -> str:
+    """Exact artifact-name match. Never falls back to the interactive picker."""
+    matched = [n for n in artifact_names if n == job_name]
+    if len(matched) == 1:
+        return matched[0]
+    if not matched:
+        seen = ", ".join(artifact_names) or "(none)"
+        _die(
+            f"No artifact named {job_name!r}. "
+            f"Candidates: {seen}"
+        )
+    _die(f"Multiple artifacts named {job_name!r}.")
+
+
 def select_artifact(
     artifact_names: list[str],
     artifacts: dict[str, dict[str, Any]],
+    job_name: str | None = None,
 ) -> dict[str, Any]:
     if not artifact_names:
         _die("No artifacts found for this workflow run.")
+
+    if job_name is not None:
+        return artifacts[_match_artifact_by_name(artifact_names, job_name)]
 
     if len(artifact_names) == 1:
         return artifacts[artifact_names[0]]
@@ -954,6 +985,11 @@ def build_parser() -> argparse.ArgumentParser:
             "      Only list artifacts for that chip (exact: esp32 does not\n"
             "      match esp32c3; esp32c6 does not match esp32c61).\n"
             "\n"
+            "  at-download-gh.py -j esp32c6_4mb_at\n"
+            "      Download that artifact from the latest master build.\n"
+            "      Exact name; skips the interactive prompt. Combine with\n"
+            "      -c to also require the chip match.\n"
+            "\n"
             f"  at-download-gh.py -u https://github.com/{REPO}/actions/runs/28586915579\n"
             "      Download from a specific GitHub Actions run URL\n"
             "      (skip branch lookup). You can also pass a numeric run id.\n"
@@ -968,6 +1004,13 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Filter artifacts by chip (exact: esp32, esp32c3, esp32c5, ...; "
             "esp32 does not match esp32c3)"
+        ),
+    )
+    p.add_argument(
+        "-j", "--job", metavar="NAME",
+        help=(
+            "Select one artifact by exact name and skip the prompt "
+            "(e.g. esp32c6_4mb_at). With --chip, the name must match that chip."
         ),
     )
     p.add_argument(
@@ -1007,6 +1050,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    job_name = _parse_job_name(args.job)
 
     if args.memory and not (args.port or args.legacy_port):
         _die("--memory/-m requires --port/-p (or legacy USB index).")
@@ -1051,7 +1095,7 @@ def main(argv: list[str] | None = None) -> int:
             f"Chip filter {args.chip!r}: {len(artifact_names)} artifact(s) left."
         )
 
-    art = select_artifact(artifact_names, artifacts)
+    art = select_artifact(artifact_names, artifacts, job_name=job_name)
     name = art["name"]
     art_id = int(art["id"])
     _info(f"Selected artifact: {name}")
