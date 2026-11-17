@@ -9,7 +9,7 @@ Prerequisites:
   1. GitHub PAT (repo + workflow). File: ~/.esptk/github_oauth_token
      (or ~/.github_oauth_token), or env GITHUB_TOKEN / GH_TOKEN.
      Fine-grained tokens: lifetime <= 366 days (espressif org policy).
-  2. For flashing: pip install esptool (or esptool / esptool.py on PATH).
+  2. For flashing: pip install esptool (or esptool on PATH).
 
 Examples:
   at-download-gh.py
@@ -764,31 +764,28 @@ def _try_import_esptool() -> bool:
         return True
     except ImportError:
         pass
-    for name in ("esptool", "esptool.py"):
-        which = shutil.which(name)
-        if not which:
-            continue
-        root = str(Path(which).resolve().parent)
-        if root not in sys.path:
-            sys.path.insert(0, root)
-        try:
-            import esptool  # noqa: F401
-            return True
-        except ImportError:
-            continue
-    return False
+    which = shutil.which("esptool")
+    if not which:
+        return False
+    root = str(Path(which).resolve().parent)
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    try:
+        import esptool  # noqa: F401
+        return True
+    except ImportError:
+        return False
 
 
 def find_esptool_cmd() -> list[str]:
-    for name in ("esptool", "esptool.py"):
-        path = shutil.which(name)
-        if path:
-            return [path]
+    path = shutil.which("esptool")
+    if path:
+        return [path]
     if _try_import_esptool():
         return [sys.executable, "-m", "esptool"]
     _die(
         "esptool not found. Install with 'pip install esptool' "
-        "(see requirements.txt) or put esptool / esptool.py on PATH."
+        "(see requirements.txt) or put esptool on PATH."
     )
 
 
@@ -801,7 +798,7 @@ def flash_from_path(port: str, baud: int, bin_path: Path | str) -> None:
     cmd = find_esptool_cmd() + [
         "--port", port,
         "--baud", str(baud),
-        "write_flash",
+        "write-flash",
         "0x0",
         str(bin_path),
     ]
@@ -868,7 +865,7 @@ def _flash_via_memfd(port: str, baud: int, bin_data: bytes) -> bool:
         cmd = find_esptool_cmd() + [
             "--port", port,
             "--baud", str(baud),
-            "write_flash",
+            "write-flash",
             "0x0",
             bin_path,
         ]
@@ -1080,8 +1077,8 @@ def main(argv: list[str] | None = None) -> int:
         print()
         print("All done! To flash manually, run:")
         print(
-            f"  esptool.py --port [PORT] --baud {args.baud} "
-            f"write_flash 0x0 {bin_path}"
+            f"  esptool --port [PORT] --baud {args.baud} "
+            f"write-flash 0x0 {bin_path}"
         )
     return 0
 

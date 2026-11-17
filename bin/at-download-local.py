@@ -561,31 +561,28 @@ def _try_import_esptool() -> bool:
         return True
     except ImportError:
         pass
-    for name in ("esptool", "esptool.py"):
-        which = shutil.which(name)
-        if not which:
-            continue
-        root = str(Path(which).resolve().parent)
-        if root not in sys.path:
-            sys.path.insert(0, root)
-        try:
-            import esptool  # noqa: F401
-            return True
-        except ImportError:
-            continue
-    return False
+    which = shutil.which("esptool")
+    if not which:
+        return False
+    root = str(Path(which).resolve().parent)
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    try:
+        import esptool  # noqa: F401
+        return True
+    except ImportError:
+        return False
 
 
 def find_esptool_cmd() -> list[str]:
-    for name in ("esptool", "esptool.py"):
-        path = shutil.which(name)
-        if path:
-            return [path]
+    path = shutil.which("esptool")
+    if path:
+        return [path]
     if _try_import_esptool():
         return [sys.executable, "-m", "esptool"]
     _die(
         "esptool not found. Install with 'pip install esptool' "
-        "(see requirements.txt) or put esptool / esptool.py on PATH."
+        "(see requirements.txt) or put esptool on PATH."
     )
 
 
@@ -602,11 +599,11 @@ def flash_from_path(port: str, baud: int, bin_path: Path | str) -> None:
 
 
 def _run_esptool_flash(port: str, baud: int, bin_path: Path | str) -> int:
-    """Run esptool write_flash; return exit code (does not exit the process)."""
+    """Run esptool write-flash; return exit code (does not exit the process)."""
     cmd = find_esptool_cmd() + [
         "--port", port,
         "--baud", str(baud),
-        "write_flash",
+        "write-flash",
         "0x0",
         str(bin_path),
     ]
@@ -816,8 +813,8 @@ def main(argv: list[str] | None = None) -> int:
             print()
             print("All done! To flash manually, extract then run:")
             print(
-                f"  esptool.py --port {port} --baud {args.baud} "
-                f"write_flash 0x0 <extracted_factory.bin>"
+                f"  esptool --port {port} --baud {args.baud} "
+                f"write-flash 0x0 <extracted_factory.bin>"
             )
         else:
             assert cand.bin_path is not None
@@ -825,8 +822,8 @@ def main(argv: list[str] | None = None) -> int:
             print()
             print("All done! To flash manually, run:")
             print(
-                f"  esptool.py --port {port} --baud {args.baud} "
-                f"write_flash 0x0 {cand.bin_path}"
+                f"  esptool --port {port} --baud {args.baud} "
+                f"write-flash 0x0 {cand.bin_path}"
             )
         return 0
 
