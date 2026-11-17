@@ -116,10 +116,9 @@ def _require_esptool() -> None:
 def _find_esptool() -> list[str]:
     import shutil
 
-    for name in ("esptool", "esptool.py"):
-        path = shutil.which(name)
-        if path:
-            return [path]
+    path = shutil.which("esptool")
+    if path:
+        return [path]
     _die("esptool not found on PATH. Install with: pip install esptool")
 
 
