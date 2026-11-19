@@ -11,10 +11,13 @@ lengthen past 8 hex chars only when two installed SHAs would collide.
 
 Examples:
   idf-store.py init
-  idf-store.py get
-  idf-store.py get 296b6eab9445fd720e71aecab961e2d3fbca9944
-  idf-store.py get --note 'ESP-AT v5.4.4' v5.4.4
-  idf-store.py get --clean v5.4.4
+  idf-store.py get    // pick an installed tree
+  idf-store.py get 296b6eab
+  idf-store.py get v5.4.4 --note custom
+  idf-store.py get v5.4.4 --clean
+  idf-store.py clean  // clean ./esp-idf
+  idf-store.py clean v5.4.4
+  idf-store.py clean 296b6eab
   idf-store.py status
   idf-store.py doctor
 """
@@ -494,6 +497,130 @@ class Store:
                 _die(f"duplicate tree for {sha}:\n  {found[sha]}\n  {p}")
             found[sha] = p
         return found
+
+    def _index_shas(self) -> list[str]:
+        trees = self.load_index().get("trees") or {}
+        out: list[str] = []
+        for key in trees:
+            if not isinstance(key, str):
+                continue
+            sha = key.strip().lower()
+            if SHA40.match(sha):
+                out.append(sha)
+        return out
+
+    def _pinned_trees(self) -> dict[str, Path]:
+        """Map full SHA -> tree directory, ignoring a drifted HEAD.
+
+        The directory name is a prefix of the installed commit. The full
+        SHA comes from the index when that prefix is unique.
+        """
+        found: dict[str, Path] = {}
+        if not self.trees.is_dir():
+            return found
+        index_shas = self._index_shas()
+        for p in sorted(self.trees.iterdir()):
+            if not p.is_dir() or p.name.startswith("."):
+                continue
+            name = p.name.lower()
+            if not HEX.match(name) or not (7 <= len(name) <= 40):
+                continue
+            sha = self._sha_for_tree_dir(p, name, index_shas)
+            if not sha:
+                continue
+            if sha in found:
+                _die(f"duplicate tree for {sha}:\n  {found[sha]}\n  {p}")
+            found[sha] = p
+        return found
+
+    def _sha_for_tree_dir(
+        self, path: Path, name: str, index_shas: list[str]
+    ) -> str | None:
+        hits = [s for s in index_shas if s.startswith(name)]
+        if len(hits) == 1:
+            return hits[0]
+        if len(hits) > 1:
+            resolved = self._commit_sha(path, name)
+            if resolved and resolved in hits:
+                return resolved
+            _die(
+                "ambiguous tree directory {0}: {1}".format(
+                    path, ", ".join(h[:12] for h in hits)
+                )
+            )
+        if SHA40.match(name):
+            return name
+        resolved = self._commit_sha(path, name)
+        if resolved and resolved.startswith(name):
+            return resolved
+        return None
+
+    def _pinned_sha_at(self, repo: Path) -> str | None:
+        try:
+            target = repo.resolve()
+        except OSError:
+            return None
+        for sha, path in self._pinned_trees().items():
+            try:
+                if path.resolve() == target:
+                    return sha
+            except OSError:
+                continue
+        return None
+
+    def _local_ref_sha(self, ref: str) -> str | None:
+        """Resolve ref inside objects.git. Does not fetch."""
+        if not self.objects.is_dir():
+            return None
+        names = [ref]
+        if not HEX.match(ref.lower()):
+            names.append("refs/idf-store/branch-" + ref.replace("/", "-"))
+        for name in names:
+            sha = self._commit_sha(self.objects, name)
+            if sha:
+                return sha
+        return None
+
+    def resolve_installed_ref(self, ref: str) -> tuple[str, Path]:
+        """Map a local ref to an installed tree. Does not fetch or clone."""
+        ref = ref.strip()
+        pinned = self._pinned_trees()
+        if HEX.match(ref.lower()) and len(ref) <= 40:
+            low = ref.lower()
+            hits = [s for s in pinned if s.startswith(low)]
+            if len(hits) > 1:
+                _die(
+                    "ambiguous SHA prefix {0!r}: {1}".format(
+                        ref, ", ".join(h[:12] for h in hits)
+                    )
+                )
+            if len(hits) == 1:
+                return hits[0], pinned[hits[0]]
+            _die(f"no installed tree for {ref!r}")
+
+        describe_hits: list[str] = []
+        lowered: dict[str, Any] = {}
+        for key, meta in (self.load_index().get("trees") or {}).items():
+            if isinstance(key, str) and isinstance(meta, dict):
+                lowered[key.strip().lower()] = meta
+        for sha in pinned:
+            text = str((lowered.get(sha) or {}).get("describe") or "")
+            if text and text == ref:
+                describe_hits.append(sha)
+        if len(describe_hits) > 1:
+            _die(
+                "ambiguous describe {0!r}: {1}".format(
+                    ref, ", ".join(h[:12] for h in describe_hits)
+                )
+            )
+        if len(describe_hits) == 1:
+            sha = describe_hits[0]
+            return sha, pinned[sha]
+
+        sha = self._local_ref_sha(ref)
+        if sha and sha in pinned:
+            return sha, pinned[sha]
+        _die(f"no installed tree for {ref!r}")
 
     def _retarget_links(self, sha: str, dest: Path) -> None:
         dest_s = str(dest.resolve())
@@ -1715,7 +1842,8 @@ class Store:
             print(f"{_c('2', 'trees:')} {_c('2', '(none)')}")
             return
         print(_c("1", "trees:"))
-        self._print_trees(shas, numbered=False, current=None, sizes=True)
+        current = self._current_sha(Path.cwd())
+        self._print_trees(shas, numbered=False, current=current, sizes=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1778,6 +1906,35 @@ def cmd_get(store: Store, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_clean(store: Store, args: argparse.Namespace) -> int:
+    if not store.initialized():
+        _die(f"store not initialized: {store.root} (run idf-store.py init)")
+    ref = (args.ref or "").strip()
+    if ref:
+        sha, dest = store.resolve_installed_ref(ref)
+    else:
+        link = Path.cwd() / LINK_NAME
+        if not link.exists():
+            _die(f"no {LINK_NAME} directory: {link}")
+        if not link.is_dir():
+            _die(f"not a directory: {link}")
+        try:
+            repo = link.resolve()
+        except OSError:
+            _die(f"no {LINK_NAME} directory: {link}")
+        found = store._pinned_sha_at(repo)
+        if found is None:
+            _die(f"{link} is not an idf-store tree")
+        sha, dest = found, repo
+    _warn(
+        "clean will discard local changes (including "
+        f"submodules) in shared tree {dest}"
+    )
+    store._clean_tree(dest, sha, jobs=args.jobs)
+    _info(f"cleaned {dest}")
+    return 0
+
+
 def cmd_status(store: Store, _args: argparse.Namespace) -> int:
     store.status()
     return 0
@@ -1815,10 +1972,13 @@ store layout (default ~/esp/idf, override with --store or IDF_STORE):
 
 examples:
   %(prog)s init
-  %(prog)s get
-  %(prog)s get 296b6eab9445fd720e71aecab961e2d3fbca9944
-  %(prog)s get --note 'ESP-AT v5.4.4' v5.4.4
-  %(prog)s get --clean v5.4.4
+  %(prog)s get    // pick an installed tree
+  %(prog)s get 296b6eab
+  %(prog)s get v5.4.4 --note custom
+  %(prog)s get v5.4.4 --clean
+  %(prog)s clean  // clean ./esp-idf
+  %(prog)s clean v5.4.4
+  %(prog)s clean 296b6eab
   %(prog)s status
   %(prog)s doctor
   %(prog)s drop 296b6eab
@@ -1872,6 +2032,28 @@ examples:
              "omit to leave unchanged, pass empty string to clear",
     )
     p_get.set_defaults(func=cmd_get)
+
+    p_clean = sub.add_parser(
+        "clean",
+        help="Reset an installed esp-idf tree to its commit, including "
+             "submodules",
+    )
+    p_clean.add_argument(
+        "ref",
+        nargs="?",
+        default=None,
+        help="Commit SHA (full or unique prefix), tag, or branch already "
+             "installed in the store. Omit to clean ./esp-idf in the "
+             "current directory",
+    )
+    p_clean.add_argument(
+        "--jobs",
+        type=int,
+        default=DEFAULT_JOBS,
+        metavar="N",
+        help=f"parallel submodule resets (default: {DEFAULT_JOBS})",
+    )
+    p_clean.set_defaults(func=cmd_clean)
 
     p_status = sub.add_parser(
         "status",
