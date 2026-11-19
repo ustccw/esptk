@@ -11,6 +11,7 @@ lengthen past 8 hex chars only when two installed SHAs would collide.
 
 Examples:
   idf-store.py init
+  idf-store.py get
   idf-store.py get 296b6eab9445fd720e71aecab961e2d3fbca9944
   idf-store.py get --note 'ESP-AT v5.4.4' v5.4.4
   idf-store.py get --clean v5.4.4
@@ -31,7 +32,9 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Iterator, NoReturn
@@ -54,6 +57,15 @@ DEFAULT_REMOTES = [
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 SHA_PREFIX = re.compile(r"^[0-9a-f]{7,40}$")
 HEX = re.compile(r"^[0-9a-f]+$")
+HEX_DESCRIBE = re.compile(r"^[0-9a-f]{7,40}$")
+DESCRIBE_DISTANCE = re.compile(r"^(.+)-(\d+)-g[0-9a-f]+$")
+PRE_RELEASE_TAG = re.compile(r"-(?:rc|beta|dev|alpha)\d*$", re.I)
+STABLE_TAG = re.compile(r"^v\d+\.\d+(?:\.\d+)?$")
+VERSION_TAG = re.compile(r"^v\d+\.\d+")
+DESCRIBE_DEPTHS = (1, 32, 128, 512, 2048, 8192)
+DESCRIBE_BUDGET_S = 60.0
+FILTER_PROBE_MAX = 2 * 1024 * 1024
+DESCRIBE_PACK_MAX = 32 * 1024 * 1024
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +140,7 @@ def git(
     capture: bool = False,
     check: bool = True,
     quiet: bool = False,
+    timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     cmd = [
         "git",
@@ -144,7 +157,11 @@ def git(
     if capture or quiet:
         kw["stdout"] = subprocess.PIPE
         kw["stderr"] = subprocess.PIPE
-    proc = subprocess.run(cmd, **kw)
+    try:
+        proc = subprocess.run(cmd, timeout=timeout, **kw)
+    except subprocess.TimeoutExpired as exc:
+        pretty = "git " + " ".join(args)
+        raise RuntimeError(f"{pretty} timed out after {timeout:.0f}s") from exc
     if check and proc.returncode != 0:
         err = (proc.stderr or proc.stdout or "").strip()
         pretty = "git " + " ".join(args)
@@ -160,6 +177,67 @@ def git_out(args: list[str], *, cwd: Path | str | None = None) -> str:
 
 def git_ok(args: list[str], *, cwd: Path | str | None = None) -> bool:
     return git(args, cwd=cwd, capture=True, check=False).returncode == 0
+
+
+def _pick_tag(names: list[str]) -> str:
+    """Prefer a final release name over rc/beta/dev tags on the same commit."""
+    def rank(name: str) -> tuple[int, int, int, str]:
+        pre = 1 if PRE_RELEASE_TAG.search(name) else 0
+        stable = 0 if STABLE_TAG.fullmatch(name) else 1
+        return (pre, stable, -len(name), name)
+
+    return min(names, key=rank)
+
+
+def _parse_peeled_tags(text: str) -> dict[str, list[str]]:
+    """Map peeled commit SHA -> tag names from `git ls-remote --tags`."""
+    pointed: dict[str, str] = {}
+    peeled: dict[str, str] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        sha, _, ref = line.partition("\t")
+        if not ref:
+            sha, _, ref = line.partition(" ")
+        sha = sha.strip().lower()
+        ref = ref.strip()
+        if not SHA40.fullmatch(sha) or not ref.startswith("refs/tags/"):
+            continue
+        if ref.endswith("^{}"):
+            peeled[ref[len("refs/tags/"):-3]] = sha
+        else:
+            pointed[ref[len("refs/tags/"):]] = sha
+    by_commit: dict[str, list[str]] = {}
+    for name, tag_sha in pointed.items():
+        commit = peeled.get(name, tag_sha)
+        by_commit.setdefault(commit, []).append(name)
+    return by_commit
+
+
+def _version_tag_map(tags: dict[str, list[str]]) -> dict[str, list[str]]:
+    """Keep release tags (v5.4, v5.4.4, v6.1-rc1). Drop qa-test and similar."""
+    out: dict[str, list[str]] = {}
+    for sha, names in tags.items():
+        kept = [name for name in names if VERSION_TAG.match(name)]
+        if kept:
+            out[sha] = kept
+    return out
+
+
+def _pack_bytes(repo: Path) -> int:
+    pack = repo / "objects" / "pack"
+    if not pack.is_dir():
+        return 0
+    return sum(p.stat().st_size for p in pack.iterdir() if p.is_file())
+
+
+def _strip_describe(text: str) -> str:
+    """`v5.0.1-86-g24b9d38` -> `v5.0.1-86`. Exact tags stay as-is."""
+    match = DESCRIBE_DISTANCE.fullmatch(text.strip())
+    if not match:
+        return text.strip()
+    return f"{match.group(1)}-{match.group(2)}"
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +422,7 @@ class Store:
         self._idx: dict[str, Any] | None = None
         self._lock_fd: Any = None
         self._bare_lock = threading.RLock()
+        self._tag_map: dict[str, list[str]] | None = None
 
     # -- layout --
 
@@ -931,11 +1010,9 @@ class Store:
             if tmp.exists():
                 shutil.rmtree(tmp, ignore_errors=True)
             raise
-        describe = self._describe(dest)
-        meta = self._tree_meta(sha)
-        meta["describe"] = describe
+        self._remember_short_describe(sha, dest)
         self.save_index()
-        _info(f"installed {sha} ({describe})")
+        _info(f"installed {sha} ({self._tree_meta(sha)['describe']})")
         return dest
 
     def _clean_tree(self, dest: Path, sha: str, *, jobs: int) -> None:
@@ -954,6 +1031,357 @@ class Store:
         if proc.returncode == 0 and proc.stdout.strip():
             return proc.stdout.strip()
         return git_out(["rev-parse", "--short", "HEAD"], cwd=repo)
+
+    def _remember_short_describe(self, sha: str, repo: Path) -> None:
+        """Keep the local short name until a real tag describe is stored."""
+        meta = self._tree_meta(sha)
+        current = str(meta.get("describe") or "")
+        if current and not HEX_DESCRIBE.fullmatch(current):
+            return
+        meta["describe"] = self._describe(repo)
+
+    def _stored_version(self, sha: str) -> str:
+        meta = (self.load_index().get("trees") or {}).get(sha) or {}
+        text = str(meta.get("describe") or "")
+        if VERSION_TAG.match(text):
+            return text
+        return ""
+
+    def _abbrev_name(self, repo: Path, sha: str) -> str:
+        """Directory name, usually 8 hex chars. Not git's variable --short."""
+        name = repo.name.lower()
+        if HEX.fullmatch(name) and sha.startswith(name):
+            return name
+        return sha[:TREE_ABBREV]
+
+    def _rev_parts(self, repo: Path, sha: str) -> tuple[str, str]:
+        short = self._abbrev_name(repo, sha)
+        version = self._stored_version(sha)
+        dirty = self._worktree_dirty(repo)
+        if version:
+            body = f"{version}-dirty" if dirty else version
+            return short, f"({body})"
+        if dirty:
+            return short, "(dirty)"
+        return short, ""
+
+    def _worktree_dirty(self, repo: Path) -> bool:
+        """Tracked changes, including submodule checkouts and their files.
+
+        Untracked and ignored files (build/, sdkconfig) do not count.
+        """
+        proc = git(
+            [
+                "status", "--porcelain",
+                "--untracked-files=no",
+                "--ignore-submodules=none",
+            ],
+            cwd=repo, capture=True, check=False,
+        )
+        return bool((proc.stdout or "").strip())
+
+    def _rev_label(self, repo: Path, sha: str) -> str:
+        short, version = self._rev_parts(repo, sha)
+        if version:
+            return f"{short} {version}"
+        return short
+
+    def _peeled_tag_map(self) -> dict[str, list[str]]:
+        if self._tag_map is not None:
+            return self._tag_map
+        last_err = ""
+        for url in self.remotes():
+            _info(f"listing tags from {url}")
+            proc = git(
+                ["ls-remote", "--tags", url],
+                capture=True, check=False, timeout=30,
+            )
+            if proc.returncode != 0:
+                last_err = (proc.stderr or proc.stdout or "").strip()
+                _warn(f"could not list tags from {url}")
+                continue
+            mapping = _version_tag_map(_parse_peeled_tags(proc.stdout or ""))
+            if mapping:
+                self._tag_map = mapping
+                return mapping
+        if last_err:
+            _warn(last_err.splitlines()[-1])
+        self._tag_map = {}
+        return {}
+
+    def ensure_version(self, sha: str) -> str:
+        """Store `v5.4.4` or `v5.0.1-86` for sha. Empty if lookup failed."""
+        have = self._stored_version(sha)
+        if have:
+            return have
+        found = self._lookup_version(sha)
+        if not found:
+            return ""
+        self._tree_meta(sha)["describe"] = found
+        self.save_index()
+        _info(f"version {sha[:12]} -> {found}")
+        return found
+
+    def _lookup_version(self, sha: str) -> str:
+        tags = self._peeled_tag_map()
+        if not tags:
+            _warn(f"could not list tags; {sha[:12]} has no version")
+            return ""
+        names = tags.get(sha)
+        if names:
+            return _pick_tag(names)
+        for url in self.remotes():
+            outcome, text = self._version_from_remote(sha, url, tags)
+            if outcome == "found":
+                return text
+            if outcome == "stop":
+                return ""
+        return ""
+
+    def _version_from_remote(
+        self, sha: str, url: str, tags: dict[str, list[str]]
+    ) -> tuple[str, str]:
+        """Return (found|next|stop, version). History stays in /tmp."""
+        tmp = Path(tempfile.mkdtemp(prefix="idf-store-"))
+        probed = False
+        try:
+            self._init_describe_tmp(tmp, url)
+            deadline = time.monotonic() + DESCRIBE_BUDGET_S
+            prev = 0
+            for depth in DESCRIBE_DEPTHS:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    _warn(
+                        f"describe {sha[:12]} exceeded "
+                        f"{DESCRIBE_BUDGET_S:.0f}s; version left unset"
+                    )
+                    return "stop", ""
+                if depth == 1:
+                    _info(f"describe {sha[:12]}: fetch --depth 1 {url}")
+                    ok = self._fetch_describe(
+                        tmp, ["--depth", "1"], sha, timeout=left,
+                    )
+                else:
+                    step = depth - prev
+                    _info(f"describe {sha[:12]}: fetch --deepen={step}")
+                    ok = self._fetch_describe(
+                        tmp, [f"--deepen={step}"], sha, timeout=left,
+                    )
+                prev = depth
+                if not ok:
+                    if probed:
+                        _warn(f"describe {sha[:12]}: fetch failed")
+                        return "stop", ""
+                    return "next", ""
+                size = _pack_bytes(tmp)
+                if not probed:
+                    probed = True
+                    if size > FILTER_PROBE_MAX:
+                        _warn(
+                            f"{url} did not honor --filter=tree:0 "
+                            f"(probe pack {_human_size(size)})"
+                        )
+                        return "next", ""
+                elif size > DESCRIBE_PACK_MAX:
+                    _warn(
+                        f"describe {sha[:12]} pack grew to "
+                        f"{_human_size(size)}; stopped"
+                    )
+                    return "stop", ""
+                version = self._version_in_tmp(tmp, sha, tags)
+                if version:
+                    return "found", version
+            _warn(
+                f"describe {sha[:12]}: no tag within "
+                f"{DESCRIBE_DEPTHS[-1]} commits"
+            )
+            return "stop", ""
+        except RuntimeError as exc:
+            _warn(str(exc).splitlines()[0])
+            if probed:
+                return "stop", ""
+            return "next", ""
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def _init_describe_tmp(self, path: Path, url: str) -> None:
+        git(["init", "--bare", str(path)], quiet=True)
+        git(["remote", "add", "origin", url], cwd=path, quiet=True)
+        git(["config", "gc.auto", "0"], cwd=path, quiet=True)
+        git(["config", "core.logAllRefUpdates", "false"], cwd=path, quiet=True)
+        git(["config", "remote.origin.promisor", "true"], cwd=path, quiet=True)
+        git(["config", "remote.origin.partialclonefilter", "tree:0"], cwd=path, quiet=True)
+        git(["config", "extensions.partialClone", "origin"], cwd=path, quiet=True)
+
+    def _fetch_describe(
+        self, repo: Path, limit: list[str], sha: str, *, timeout: float
+    ) -> bool:
+        spec = f"{sha}:refs/idf-store/{sha}"
+        proc = git(
+            ["fetch", "--filter=tree:0", *limit, "origin", spec],
+            cwd=repo, capture=True, check=False, timeout=max(1.0, timeout),
+        )
+        if proc.returncode != 0:
+            err = (proc.stderr or proc.stdout or "").strip()
+            if err:
+                _warn(err.splitlines()[-1])
+            return False
+        return git_ok(
+            ["-c", "remote.origin.promisor=false", "cat-file", "-e", sha],
+            cwd=repo,
+        )
+
+    def _set_lazy_fetch(self, repo: Path, enabled: bool) -> None:
+        if enabled:
+            git(["config", "remote.origin.promisor", "true"], cwd=repo)
+            git(["config", "extensions.partialClone", "origin"], cwd=repo)
+            return
+        git(
+            ["config", "--unset-all", "extensions.partialClone"],
+            cwd=repo, check=False,
+        )
+        git(["config", "remote.origin.promisor", "false"], cwd=repo)
+
+    def _version_in_tmp(
+        self, repo: Path, sha: str, tags: dict[str, list[str]]
+    ) -> str:
+        self._set_lazy_fetch(repo, False)
+        try:
+            return self._describe_loaded(repo, sha, tags)
+        finally:
+            self._set_lazy_fetch(repo, True)
+
+    def _describe_loaded(
+        self, repo: Path, sha: str, tags: dict[str, list[str]]
+    ) -> str:
+        proc = git(
+            ["-c", "remote.origin.promisor=false", "rev-list", sha],
+            cwd=repo, capture=True, check=False,
+        )
+        if proc.returncode != 0:
+            return ""
+        have = set((proc.stdout or "").split())
+        hit = False
+        for commit, names in tags.items():
+            if commit not in have:
+                continue
+            hit = True
+            git(
+                ["update-ref", f"refs/tags/{_pick_tag(names)}", commit],
+                cwd=repo, check=False,
+            )
+        if not hit:
+            return ""
+        described = git(
+            ["-c", "remote.origin.promisor=false", "describe", "--tags", sha],
+            cwd=repo, capture=True, check=False,
+        )
+        if described.returncode != 0:
+            return ""
+        return _strip_describe(described.stdout or "")
+
+    def _current_sha(self, project: Path) -> str | None:
+        link = project / LINK_NAME
+        if not link.is_symlink():
+            return None
+        try:
+            target = link.resolve()
+        except OSError:
+            return None
+        for sha in self.installed_shas():
+            if self.tree_path(sha).resolve() == target:
+                return sha
+        return None
+
+    def _print_trees(
+        self, shas: list[str], *, numbered: bool, current: str | None,
+        sizes: bool,
+    ) -> None:
+        rows: list[dict[str, Any]] = []
+        for sha in shas:
+            dest = self.tree_path(sha)
+            short, version = self._rev_parts(dest, sha)
+            self.unregister_stale_links(sha)
+            entries = self._link_entries(sha)
+            rows.append({
+                "sha": sha,
+                "short": short,
+                "version": version,
+                "date": self._commit_date(dest),
+                "size": _human_size(_du_bytes(dest)) if sizes else "",
+                "nlink": len(entries),
+                "entries": entries,
+            })
+        if not rows:
+            return
+        w_short = max(len(r["short"]) for r in rows)
+        w_ver = max(len(r["version"]) for r in rows)
+        w_size = max((len(r["size"]) for r in rows), default=0) if sizes else 0
+        w_nlink = max(len(str(r["nlink"])) for r in rows)
+        idx_w = len(str(len(rows)))
+        for i, row in enumerate(rows, 1):
+            if numbered:
+                prefix = f"  {i:>{idx_w}}) "
+            else:
+                prefix = "  "
+            short = row["short"].ljust(w_short)
+            version = row["version"]
+            pad = " " * (w_ver - len(version))
+            version_col = (_c("1;33", version) + pad) if version else pad
+            if w_ver:
+                version_col += "  "
+            size_col = ""
+            if sizes:
+                size_col = f"{_c('33', row['size'].rjust(w_size))}  "
+            nlink = row["nlink"]
+            mark = ""
+            if current is not None and row["sha"] == current:
+                mark = " " + _c("1;33", "current")
+            print(
+                f"{prefix}{_c('1;97', row['sha'])}  "
+                f"{_c('1;36', short)}  {version_col}"
+                f"{_c('2', row['date'])}  "
+                f"{size_col}"
+                f"{_c('32' if nlink else '2', f'{nlink:>{w_nlink}} link(s)')}"
+                f"{mark}"
+            )
+            for entry in row["entries"]:
+                line = f"    {_c('36', entry['path'])}"
+                if entry["note"]:
+                    line += " " + _c("2", f"({entry['note']})")
+                print(line)
+
+    def pick_installed(self, project: Path) -> str:
+        shas = self.installed_shas()
+        if not shas:
+            _die(f"no installed trees in {self.root}")
+        if not sys.stdin.isatty() or not sys.stdout.isatty():
+            _die("ref required when not running in a terminal")
+        current = self._current_sha(project)
+        print(_c("1", "installed commits:"))
+        self._print_trees(shas, numbered=True, current=current, sizes=False)
+        while True:
+            try:
+                ans = input(
+                    "select [number or sha prefix, q to abort]: "
+                ).strip()
+            except EOFError:
+                _die("aborted")
+            if not ans or ans.lower() == "q":
+                _die("aborted")
+            if ans.isdigit():
+                n = int(ans)
+                if 1 <= n <= len(shas):
+                    return shas[n - 1]
+                _warn(f"choose 1..{len(shas)}")
+                continue
+            hits = [s for s in shas if s.startswith(ans.lower())]
+            if len(hits) == 1:
+                return hits[0]
+            if len(hits) > 1:
+                _warn(f"ambiguous prefix {ans!r}")
+            else:
+                _warn(f"no installed tree matches {ans!r}")
 
     def _commit_date(self, repo: Path) -> str:
         proc = git(
@@ -1074,7 +1502,7 @@ class Store:
             self._tree_meta(sha)["links"] = entries
         dest = self.tree_path(sha)
         if dest.is_dir():
-            self._tree_meta(sha)["describe"] = self._describe(dest)
+            self._remember_short_describe(sha, dest)
         self.save_index()
 
     def unregister_stale_links(self, sha: str) -> None:
@@ -1287,26 +1715,7 @@ class Store:
             print(f"{_c('2', 'trees:')} {_c('2', '(none)')}")
             return
         print(_c("1", "trees:"))
-        for sha in shas:
-            dest = self.tree_path(sha)
-            meta = self._tree_meta(sha)
-            describe = meta.get("describe") or self._describe(dest)
-            date = self._commit_date(dest)
-            self.unregister_stale_links(sha)
-            entries = self._link_entries(sha)
-            size = _human_size(_du_bytes(dest))
-            nlink = len(entries)
-            print(
-                f"  {_c('1;97', sha)}  {_c('1;36', describe)}  "
-                f"{_c('2', date)}  {_c('33', size)}  "
-                f"{_c('32' if nlink else '2', f'{nlink} link(s)')}"
-            )
-            if entries:
-                for entry in entries:
-                    line = f"    {_c('36', entry['path'])}"
-                    if entry["note"]:
-                        line += " " + _c("2", f"({entry['note']})")
-                    print(line)
+        self._print_trees(shas, numbered=False, current=None, sizes=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1344,9 +1753,21 @@ def cmd_get(store: Store, args: argparse.Namespace) -> int:
         _die(f"store not initialized: {store.root} (run idf-store.py init)")
     project = Path(args.dir).expanduser().resolve() if args.dir else Path.cwd()
     store.assert_esp_idf_slot(project)
-    sha = store.resolve_super_ref(args.ref)
-    _info(f"resolved {args.ref} -> {sha}")
+    ref = (args.ref or "").strip()
+    if ref:
+        sha = store.resolve_super_ref(ref)
+        _info(f"resolved {ref} -> {sha}")
+    else:
+        sha = store.pick_installed(project)
+        _info(f"selected {sha}")
     dest = store.link_project(sha, project, clean=args.clean, jobs=args.jobs)
+    store.ensure_version(sha)
+    tree = store.tree_path(sha)
+    short, version = store._rev_parts(tree, sha)
+    label = _c("1;36", short)
+    if version:
+        label += " " + _c("1;33", version)
+    _info(label)
     if args.note is not None:
         store.set_note(sha, args.note, link=dest)
         text = (args.note or "").strip()
@@ -1394,6 +1815,7 @@ store layout (default ~/esp/idf, override with --store or IDF_STORE):
 
 examples:
   %(prog)s init
+  %(prog)s get
   %(prog)s get 296b6eab9445fd720e71aecab961e2d3fbca9944
   %(prog)s get --note 'ESP-AT v5.4.4' v5.4.4
   %(prog)s get --clean v5.4.4
@@ -1418,7 +1840,11 @@ examples:
         help="Install trees/<8-char-sha> if needed and symlink ./esp-idf",
     )
     p_get.add_argument(
-        "ref", help="Commit SHA (full or unique prefix), tag, or branch"
+        "ref",
+        nargs="?",
+        default=None,
+        help="Commit SHA (full or unique prefix), tag, or branch. "
+             "Omit to pick an installed tree interactively",
     )
     p_get.add_argument(
         "--clean",
@@ -1448,7 +1874,8 @@ examples:
     p_get.set_defaults(func=cmd_get)
 
     p_status = sub.add_parser(
-        "status", help="Show installed SHAs, sizes, and symlinks"
+        "status",
+        help="Show installed commits, versions, sizes, and symlinks",
     )
     p_status.set_defaults(func=cmd_status)
     p_list = sub.add_parser("list", help="Alias for status")
