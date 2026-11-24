@@ -82,6 +82,7 @@ class Proc:
     user: str
     cpu: float
     mem: float
+    rss_kb: int
     state: str
     command: str
     ports: list[int] = field(default_factory=list)
@@ -209,6 +210,7 @@ def collect_proc(pid: int, *, uptime: float, clk: int, mem_total: int) -> Proc |
         user=_username(uid),
         cpu=_cpu_pct(stat, uptime, clk),
         mem=mem,
+        rss_kb=rss_kb,
         state=state,
         command=_cmdline(pid, comm or str(pid)),
     )
@@ -444,6 +446,23 @@ def _clip_cmd(cmd: str) -> str:
     return cmd[: CMD_MAX - 3] + "..."
 
 
+def _format_pct(value: float) -> str:
+    if value < 0.1:
+        return "<0.1%"
+    return f"{value:.1f}%"
+
+
+def _format_summary(rows: list[Proc]) -> str:
+    """Sum of the CPU% and MEM% columns. CPU is each process's lifetime average."""
+    total_cpu = sum(p.cpu for p in rows)
+    total_kb = sum(p.rss_kb for p in rows)
+    total_pct = sum(p.mem for p in rows)
+    return (
+        f"Total: CPU avg {_format_pct(total_cpu)}, "
+        f"Memory {total_kb / 1024:.1f} MB ({_format_pct(total_pct)})"
+    )
+
+
 def print_table(rows: list[Proc]) -> None:
     header = f"{'#':>3}  {'PID':>7}  {'USER':<12} {'CPU%':>6}  {'MEM%':>6}  {'STAT':<4}  COMMAND"
     print(_c("1", header))
@@ -453,6 +472,9 @@ def print_table(rows: list[Proc]) -> None:
             f"{i:3d}  {p.pid:7d}  {p.user:<12} {p.cpu:6.1f}  {p.mem:6.1f}  "
             f"{p.state:<4}  {cmd}"
         )
+    if rows:
+        print()
+        print(_c("1;93", _format_summary(rows)))
 
 
 def parse_selection(text: str, n: int) -> list[int] | None:
