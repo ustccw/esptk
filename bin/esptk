@@ -59,6 +59,7 @@ function SHOW_FEATURES()
     ESP_LOGN ""
 
     ESP_LOGN "px:\tList or kill processes by keyword, port, or device"
+    ESP_LOGN "chatbot:\tOpen chat.espressif.com in the browser"
     ESP_LOGN "cp-img:\tCopy the image file to the clipboard"
     ESP_LOGN "cusb:\tchmod 777 /dev/ttyUSB*"
     ESP_LOGN "susb:\tSee the /dev/ttyUSB* device"

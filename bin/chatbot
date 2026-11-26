@@ -1,0 +1,32 @@
+#!/bin/bash
+# chenwu@espressif.com
+set -e
+
+TK_PATH=`realpath $0`
+TK_PATH=`echo ${TK_PATH%/bin*}`
+source $TK_PATH/bin/esptk-export
+
+URL="https://chat.espressif.com"
+
+if [ "$1" = "-h" ]; then
+    ESP_LOGB "NAME\r\n  chatbot: open ${URL}\r\n"
+    ESP_LOGN "  chatbot: open Espressif Docs AI in the default browser"
+    ESP_LOGN "  The page opens the chat and focuses the input.\r\n"
+    ESP_LOGB "  Prerequisite:"
+    ESP_LOGN "  xdg-open, and a graphical session (DISPLAY or WAYLAND_DISPLAY)"
+    exit
+fi
+
+if [ $# -gt 0 ]; then
+    ESP_LOGE "unsupported parameter counts: $#"
+fi
+
+if ! command -v xdg-open >/dev/null 2>&1; then
+    ESP_LOGE "xdg-open not found"
+fi
+
+if [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    ESP_LOGE "no graphical session (DISPLAY / WAYLAND_DISPLAY unset)"
+fi
+
+xdg-open "$URL" >/dev/null 2>&1 || ESP_LOGE "failed to open ${URL}"
